@@ -1,5 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import '../../features/feedback/data/feedback_repository.dart';
 
 final supabaseClientProvider = Provider<SupabaseClient>(
   (_) => Supabase.instance.client,
@@ -34,3 +35,7 @@ final isEditorProvider = Provider<bool>((ref) {
   final role = ref.watch(editorRoleProvider).valueOrNull;
   return role == 'editor' || role == 'admin';
 });
+
+final feedbackRepositoryProvider = Provider<FeedbackRepository>(
+  (ref) => FeedbackRepository(ref.watch(supabaseClientProvider)),
+);

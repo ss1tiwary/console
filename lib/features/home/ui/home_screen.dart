@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import '../../extraction/ui/extraction_panel.dart';
+import '../../feedback/ui/feedback_panel.dart';
+import '../../ideas/ui/ideas_panel.dart';
+import '../../relevance/ui/relevance_hub_panel.dart';
 
-// Navigation destinations — expanded in Phase 3 when admin screens move in.
 enum _Dest { extraction, feedback, relevance, ideas }
 
 class HomeScreen extends StatefulWidget {
@@ -17,6 +20,7 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: const Color(0xFFF8F9FA),
       body: Row(
         children: [
           NavigationRail(
@@ -62,19 +66,16 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
           ),
           const VerticalDivider(width: 1, thickness: 1),
-          Expanded(child: _body()),
+          Expanded(child: _panel()),
         ],
       ),
     );
   }
 
-  Widget _body() {
-    // Placeholder — replaced in Phase 3 when screens are moved in.
-    return Center(
-      child: Text(
-        _current.name,
-        style: Theme.of(context).textTheme.titleMedium,
-      ),
-    );
-  }
+  Widget _panel() => switch (_current) {
+        _Dest.extraction => const ExtractionPanel(),
+        _Dest.feedback => const FeedbackPanel(),
+        _Dest.relevance => const RelevanceHubPanel(),
+        _Dest.ideas => const IdeasPanel(),
+      };
 }
