@@ -8,6 +8,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../../core/di/providers.dart';
 import '../../../core/palette.dart';
 import '../../../core/spacing.dart';
+import 'extraction_review_panel.dart';
 
 // ── Model ─────────────────────────────────────────────────────────────────────
 
@@ -73,88 +74,50 @@ final extractionJobsProvider =
 
 // ── Panel ─────────────────────────────────────────────────────────────────────
 
-class ExtractionPanel extends ConsumerWidget {
+class ExtractionPanel extends ConsumerStatefulWidget {
   const ExtractionPanel({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final theme = Theme.of(context);
-    final jobsAsync = ref.watch(extractionJobsProvider);
+  ConsumerState<ExtractionPanel> createState() => _ExtractionPanelState();
+}
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
+class _ExtractionPanelState extends ConsumerState<ExtractionPanel> {
+  ExtractionJob? _selected;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
       children: [
-        // Header
-        Container(
-          color: AppPalette.white,
-          padding: const EdgeInsets.fromLTRB(20, 16, 20, 12),
-          child: Row(
-            children: [
-              Text('PYQ Extraction',
-                  style: theme.textTheme.titleLarge
-                      ?.copyWith(fontWeight: FontWeight.w700)),
-              const Spacer(),
-              FilledButton.icon(
-                style: FilledButton.styleFrom(
-                    backgroundColor: AppPalette.indigo),
-                icon: const Icon(Icons.upload_file, size: 18),
-                label: const Text('New paper'),
-                onPressed: () => _showNewJobSheet(context, ref),
-              ),
-            ],
-          ),
-        ),
-        const Divider(height: 1, color: AppPalette.grey200),
-        // Body
-        Expanded(
-          child: jobsAsync.when(
-            loading: () =>
-                const Center(child: CircularProgressIndicator()),
-            error: (e, _) => Center(child: Text('Error: $e')),
-            data: (jobs) => jobs.isEmpty
-                ? Center(
-                    child: Text(
-                      'No extraction jobs yet.\nTap "New paper" to start.',
-                      textAlign: TextAlign.center,
-                      style: theme.textTheme.bodyMedium
-                          ?.copyWith(color: AppPalette.grey400),
-                    ),
-                  )
-                : ListView.separated(
-                    padding: const EdgeInsets.fromLTRB(
-                        AppSpacing.pagePadding,
-                        12,
-                        AppSpacing.pagePadding,
-                        32),
-                    itemCount: jobs.length,
-                    separatorBuilder: (_, _) =>
-                        const SizedBox(height: 8),
-                    itemBuilder: (_, i) => _JobCard(
-                      job: jobs[i],
-                      onTap: () =>
-                          _showJobDetail(context, ref, jobs[i]),
-                    ),
-                  ),
-          ),
-        ),
+        SizedBox(width: 310, child: _JobList(
+          selected: _selected,
+          onSelect: (job) => setState(() => _selected = job),
+          onNewJob: () => _showNewJobSheet(context),
+        )),
+        const VerticalDivider(width: 1, thickness: 1),
+        Expanded(child: _rightPane()),
       ],
     );
   }
 
-  void _showNewJobSheet(BuildContext context, WidgetRef ref) {
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: AppPalette.white,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
-      ),
-      builder: (_) => const _NewJobSheet(),
+  Widget _rightPane() {
+    final job = _selected;
+    if (job == null) {
+      return Center(
+        child: Text(
+          'Select a job to review its questions.',
+          style: Theme.of(context).textTheme.bodyMedium
+              ?.copyWith(color: AppPalette.grey400),
+        ),
+      );
+    }
+    return ExtractionReviewPanel(
+      key: ValueKey(job.id),
+      job: job,
+      onShowStats: () => _showJobDetail(context, job),
     );
   }
 
-  void _showJobDetail(
-      BuildContext context, WidgetRef ref, ExtractionJob job) {
+  void _showJobDetail(BuildContext context, ExtractionJob job) {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -165,14 +128,101 @@ class ExtractionPanel extends ConsumerWidget {
       builder: (_) => _JobDetailSheet(jobId: job.id),
     );
   }
+
+  void _showNewJobSheet(BuildContext context) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: AppPalette.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (_) => const _NewJobSheet(),
+    );
+  }
+}
+
+// ── Job list (left pane) ──────────────────────────────────────────────────────
+
+class _JobList extends ConsumerWidget {
+  final ExtractionJob? selected;
+  final ValueChanged<ExtractionJob> onSelect;
+  final VoidCallback onNewJob;
+  const _JobList({
+    required this.selected,
+    required this.onSelect,
+    required this.onNewJob,
+  });
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final theme = Theme.of(context);
+    final jobsAsync = ref.watch(extractionJobsProvider);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Container(
+          color: AppPalette.white,
+          padding: const EdgeInsets.fromLTRB(16, 16, 12, 12),
+          child: Row(
+            children: [
+              Text('PYQ Extraction',
+                  style: theme.textTheme.titleMedium
+                      ?.copyWith(fontWeight: FontWeight.w700)),
+              const Spacer(),
+              IconButton(
+                icon: const Icon(Icons.upload_file, size: 20),
+                tooltip: 'New paper',
+                color: AppPalette.indigo,
+                onPressed: onNewJob,
+              ),
+            ],
+          ),
+        ),
+        const Divider(height: 1, color: AppPalette.grey200),
+        Expanded(
+          child: jobsAsync.when(
+            loading: () =>
+                const Center(child: CircularProgressIndicator()),
+            error: (e, _) => Center(child: Text('Error: $e')),
+            data: (jobs) => jobs.isEmpty
+                ? Center(
+                    child: Text(
+                      'No jobs yet.\nTap  to start.',
+                      textAlign: TextAlign.center,
+                      style: theme.textTheme.bodyMedium
+                          ?.copyWith(color: AppPalette.grey400),
+                    ),
+                  )
+                : ListView.separated(
+                    padding: const EdgeInsets.fromLTRB(10, 10, 10, 32),
+                    itemCount: jobs.length,
+                    separatorBuilder: (_, _) =>
+                        const SizedBox(height: 6),
+                    itemBuilder: (_, i) => _JobCard(
+                      job: jobs[i],
+                      isSelected: jobs[i].id == selected?.id,
+                      onTap: () => onSelect(jobs[i]),
+                    ),
+                  ),
+          ),
+        ),
+      ],
+    );
+  }
 }
 
 // ── Job card ──────────────────────────────────────────────────────────────────
 
 class _JobCard extends StatelessWidget {
   final ExtractionJob job;
+  final bool isSelected;
   final VoidCallback onTap;
-  const _JobCard({required this.job, required this.onTap});
+  const _JobCard(
+      {required this.job,
+      required this.isSelected,
+      required this.onTap});
 
   @override
   Widget build(BuildContext context) {
@@ -189,11 +239,14 @@ class _JobCard extends StatelessWidget {
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        padding: const EdgeInsets.all(14),
+        padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
-          color: AppPalette.white,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: AppPalette.grey200),
+          color: isSelected ? AppPalette.indigoLight : AppPalette.white,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(
+            color: isSelected ? AppPalette.indigo : AppPalette.grey200,
+            width: isSelected ? 1.5 : 1,
+          ),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
