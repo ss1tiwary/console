@@ -1,7 +1,18 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:identity/identity.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'app.dart';
+import 'core/theme/console_logo.dart';
+
+final _authConfig = AuthConfig(
+  appName: 'Resolve Console',
+  tagline: 'Editor access only',
+  valueProps: const [],
+  methods: const {AuthMethod.google},
+  editorGated: true,
+  logo: const ConsoleLogo(),
+);
 
 // Public anon key — safe to commit (read-only client credential).
 // service_role key is NEVER in Flutter code (PRINCIPLES security rule).
@@ -19,5 +30,13 @@ void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   // ignore: deprecated_member_use — supabase_flutter renames anonKey→publishableKey
   await Supabase.initialize(url: _supabaseUrl, anonKey: _supabaseAnonKey);
-  runApp(const ProviderScope(child: ConsoleApp()));
+
+  runApp(
+    ProviderScope(
+      overrides: [
+        authConfigProvider.overrideWithValue(_authConfig),
+      ],
+      child: const ConsoleApp(),
+    ),
+  );
 }

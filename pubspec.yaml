@@ -19,6 +19,10 @@ dependencies:
   qbank_ui:
     path: ../packages/qbank_ui
 
+  # Shared auth kernel — login, profile, auth state, editor gate.
+  identity:
+    path: ../packages/identity
+
   cupertino_icons: ^1.0.8
 
   # State management
@@ -30,9 +34,13 @@ dependencies:
   # Supabase (same project as the rest of the platform)
   supabase_flutter: ^2.8.0
 
-  # File upload (PDF / image) for extraction tool — web + Windows only targets,
-  # no Android so compileSdk 36 constraint never applies here.
+  # File upload (PDF / image) for extraction tool.
+  # compileSdk 36 required by file_picker 8.x on Android — set in build.gradle.kts.
   file_picker: ^8.1.2
+
+  # Auth — native Google Sign-In → Supabase signInWithIdToken.
+  # Same web client ID and GCP project as PIBrief.
+  google_sign_in: ^6.2.0
 
   # UI
   google_fonts: ^6.2.1

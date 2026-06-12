@@ -10,11 +10,18 @@ import 'relevance_review_screen.dart';
 class _PostSummary {
   final String id;
   final String title;
-  final DateTime publishedDate;
-  const _PostSummary(
-      {required this.id,
-      required this.title,
-      required this.publishedDate});
+  final DateTime publishedAt;
+  final int prelimsScore;
+  final int mainsScore;
+  final int relevanceScore;
+  const _PostSummary({
+    required this.id,
+    required this.title,
+    required this.publishedAt,
+    required this.prelimsScore,
+    required this.mainsScore,
+    required this.relevanceScore,
+  });
 }
 
 final _recentPostsProvider =
@@ -22,15 +29,17 @@ final _recentPostsProvider =
   final rows = await ref
       .watch(supabaseClientProvider)
       .from('posts')
-      .select('id, title, published_date')
-      .order('published_date', ascending: false)
+      .select('id, title, published_at, prelims_score, mains_score, relevance_score')
+      .order('published_at', ascending: false)
       .limit(200);
   return (rows as List)
       .map((r) => _PostSummary(
             id: r['id'] as String,
             title: (r['title'] as String?) ?? '(untitled)',
-            publishedDate:
-                DateTime.parse(r['published_date'] as String),
+            publishedAt: DateTime.parse(r['published_at'] as String),
+            prelimsScore: (r['prelims_score'] as num?)?.toInt() ?? 0,
+            mainsScore: (r['mains_score'] as num?)?.toInt() ?? 0,
+            relevanceScore: (r['relevance_score'] as num?)?.toInt() ?? 0,
           ))
       .toList();
 });
@@ -173,6 +182,12 @@ class _PostTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final (badgeColor, badgeLabel) = switch (post.relevanceScore) {
+      >= 70 => (AppPalette.green, 'HIGH'),
+      >= 40 => (AppPalette.amber, 'MED'),
+      _ => (AppPalette.grey400, 'LOW'),
+    };
+
     return InkWell(
       onTap: onTap,
       borderRadius: BorderRadius.circular(10),
@@ -184,29 +199,57 @@ class _PostTile extends StatelessWidget {
           borderRadius: BorderRadius.circular(10),
           border: Border.all(color: AppPalette.grey200),
         ),
-        child: Row(children: [
-          Expanded(
-            child: Column(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(post.title,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: theme.textTheme.bodyMedium
-                        ?.copyWith(fontWeight: FontWeight.w600)),
-                const SizedBox(height: 3),
-                Text(
-                  _formatDate(post.publishedDate),
-                  style: theme.textTheme.bodySmall
-                      ?.copyWith(color: AppPalette.grey400),
+                // Relevance badge — top of each post tile
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 7, vertical: 2),
+                  decoration: BoxDecoration(
+                    border: Border.all(color: badgeColor),
+                    borderRadius: BorderRadius.circular(5),
+                  ),
+                  child: Text(
+                    badgeLabel,
+                    style: TextStyle(
+                      color: badgeColor,
+                      fontSize: 10,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
                 ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    _formatDate(post.publishedAt),
+                    style: theme.textTheme.bodySmall
+                        ?.copyWith(color: AppPalette.grey400),
+                  ),
+                ),
+                const Icon(Icons.chevron_right,
+                    size: 16, color: AppPalette.grey400),
               ],
             ),
-          ),
-          const SizedBox(width: 8),
-          const Icon(Icons.chevron_right,
-              color: AppPalette.grey400),
-        ]),
+            const SizedBox(height: 6),
+            Text(
+              post.title,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: theme.textTheme.bodyMedium
+                  ?.copyWith(fontWeight: FontWeight.w600),
+            ),
+            const SizedBox(height: 6),
+            Row(children: [
+              _ScorePill('P', post.prelimsScore, AppPalette.indigo),
+              const SizedBox(width: 6),
+              _ScorePill('M', post.mainsScore, AppPalette.green),
+            ]),
+          ],
+        ),
       ),
     );
   }
@@ -217,5 +260,31 @@ class _PostTile extends StatelessWidget {
       'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'
     ];
     return '${dt.day} ${months[dt.month - 1]} ${dt.year}';
+  }
+}
+
+class _ScorePill extends StatelessWidget {
+  final String track;
+  final int score;
+  final Color color;
+  const _ScorePill(this.track, this.score, this.color);
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.08),
+        borderRadius: BorderRadius.circular(5),
+      ),
+      child: Text(
+        '$track $score',
+        style: TextStyle(
+          color: color,
+          fontSize: 10,
+          fontWeight: FontWeight.w700,
+        ),
+      ),
+    );
   }
 }
