@@ -70,9 +70,10 @@ enum _Lang { en, hi }
 
 class ExtractionReviewPanel extends ConsumerStatefulWidget {
   final ExtractionJob job;
+  final VoidCallback? onBack;
   final VoidCallback? onShowStats;
   const ExtractionReviewPanel(
-      {super.key, required this.job, this.onShowStats});
+      {super.key, required this.job, this.onBack, this.onShowStats});
 
   @override
   ConsumerState<ExtractionReviewPanel> createState() =>
@@ -99,6 +100,7 @@ class _ExtractionReviewPanelState
           lang: _lang,
           onLangChanged: (l) => setState(() => _lang = l),
           onRefresh: _refresh,
+          onBack: widget.onBack,
           onShowStats: widget.onShowStats,
         ),
         const Divider(height: 1, color: AppPalette.grey200),
@@ -181,12 +183,14 @@ class _Header extends StatelessWidget {
   final _Lang lang;
   final ValueChanged<_Lang> onLangChanged;
   final VoidCallback onRefresh;
+  final VoidCallback? onBack;
   final VoidCallback? onShowStats;
   const _Header({
     required this.job,
     required this.lang,
     required this.onLangChanged,
     required this.onRefresh,
+    this.onBack,
     this.onShowStats,
   });
 
@@ -195,39 +199,41 @@ class _Header extends StatelessWidget {
     final theme = Theme.of(context);
     return Container(
       color: AppPalette.white,
-      padding: const EdgeInsets.fromLTRB(20, 14, 12, 10),
+      padding: const EdgeInsets.fromLTRB(8, 10, 8, 10),
       child: Row(
         children: [
+          if (onBack != null)
+            IconButton(
+              icon: const Icon(Icons.arrow_back_ios_new_rounded,
+                  size: 18),
+              tooltip: 'Back',
+              onPressed: onBack,
+              padding: EdgeInsets.zero,
+              constraints:
+                  const BoxConstraints(minWidth: 36, minHeight: 36),
+            ),
           Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  '${job.year} · ${job.paper} · Set ${job.paperSet}',
-                  style: theme.textTheme.titleMedium
-                      ?.copyWith(fontWeight: FontWeight.w700),
-                ),
-                Text(
-                  'Review draft questions before publishing',
-                  style: theme.textTheme.bodySmall
-                      ?.copyWith(color: AppPalette.grey600),
-                ),
-              ],
+            child: Padding(
+              padding: EdgeInsets.only(
+                  left: onBack != null ? 0 : 12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    '${job.year} · ${job.paper} · Set ${job.paperSet}',
+                    style: theme.textTheme.titleSmall
+                        ?.copyWith(fontWeight: FontWeight.w700),
+                  ),
+                  Text(
+                    job.examLabel,
+                    style: theme.textTheme.bodySmall
+                        ?.copyWith(color: AppPalette.grey400),
+                  ),
+                ],
+              ),
             ),
           ),
-          SegmentedButton<_Lang>(
-            segments: const [
-              ButtonSegment(value: _Lang.en, label: Text('EN')),
-              ButtonSegment(value: _Lang.hi, label: Text('हिं')),
-            ],
-            selected: {lang},
-            onSelectionChanged: (s) => onLangChanged(s.first),
-            style: SegmentedButton.styleFrom(
-              selectedBackgroundColor: AppPalette.indigo,
-              selectedForegroundColor: AppPalette.white,
-              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-            ),
-          ),
+          _LangPill(lang: lang, onChanged: onLangChanged),
           if (onShowStats != null)
             IconButton(
               icon: const Icon(Icons.analytics_outlined, size: 20),
@@ -626,6 +632,52 @@ class _OptionsPreview extends StatelessWidget {
           onSelect: null,
         );
     }
+  }
+}
+
+// ── Language pill (PIBrief-style EN / हिं) ────────────────────────────────────
+
+class _LangPill extends StatelessWidget {
+  final _Lang lang;
+  final ValueChanged<_Lang> onChanged;
+  const _LangPill({required this.lang, required this.onChanged});
+
+  Widget _seg(_Lang l, String label) {
+    final active = lang == l;
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: () => onChanged(l),
+      child: Container(
+        padding:
+            const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+        color: active ? AppPalette.indigoLight : Colors.transparent,
+        child: Text(
+          label,
+          style: TextStyle(
+            fontSize: 12,
+            fontWeight: active ? FontWeight.w700 : FontWeight.w500,
+            color: active ? AppPalette.indigo : AppPalette.grey600,
+          ),
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        border: Border.all(color: AppPalette.grey200),
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(999),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [_seg(_Lang.en, 'EN'), _seg(_Lang.hi, 'हिं')],
+        ),
+      ),
+    );
   }
 }
 
