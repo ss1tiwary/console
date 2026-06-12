@@ -250,19 +250,22 @@ class _JobListPane extends ConsumerWidget {
             },
           ),
         ),
-        Container(
-          color: AppPalette.white,
-          padding: const EdgeInsets.fromLTRB(12, 10, 12, 14),
-          child: FilledButton.icon(
-            style: FilledButton.styleFrom(
-              backgroundColor: AppPalette.indigo,
-              minimumSize: const Size(double.infinity, 44),
-              shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(10)),
+        SafeArea(
+          top: false,
+          child: Container(
+            color: AppPalette.white,
+            padding: const EdgeInsets.fromLTRB(12, 10, 12, 14),
+            child: FilledButton.icon(
+              style: FilledButton.styleFrom(
+                backgroundColor: AppPalette.indigo,
+                minimumSize: const Size(double.infinity, 44),
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10)),
+              ),
+              icon: const Icon(Icons.upload_file_outlined, size: 18),
+              label: const Text('New extraction'),
+              onPressed: onNewJob,
             ),
-            icon: const Icon(Icons.upload_file_outlined, size: 18),
-            label: const Text('New extraction'),
-            onPressed: onNewJob,
           ),
         ),
       ],
@@ -612,6 +615,49 @@ const _kExams = <String, String>{
 
 const _kSets = ['A', 'B', 'C', 'D'];
 
+// ── Layout presets ────────────────────────────────────────────────────────────
+// A preset is the human-facing choice; it maps to the worker contract's `layout`
+// value + the page knobs (start_page / page_step / hindi_offset) so the user never
+// has to reason about raw page numbers. See question-bank/extract_worker.py.
+
+enum _LayoutPreset { upscPagePair, samePage, englishOnly }
+
+extension _LayoutPresetX on _LayoutPreset {
+  String get title => switch (this) {
+        _LayoutPreset.upscPagePair => 'UPSC bilingual',
+        _LayoutPreset.samePage     => 'Bilingual · same page',
+        _LayoutPreset.englishOnly   => 'English only',
+      };
+
+  String get subtitle => switch (this) {
+        _LayoutPreset.upscPagePair => 'Hindi printed on a separate page',
+        _LayoutPreset.samePage     => 'English + Hindi in one page (2 columns)',
+        _LayoutPreset.englishOnly   => 'No Hindi extraction',
+      };
+
+  IconData get icon => switch (this) {
+        _LayoutPreset.upscPagePair => Icons.auto_stories_outlined,
+        _LayoutPreset.samePage     => Icons.vertical_split_outlined,
+        _LayoutPreset.englishOnly   => Icons.subject,
+      };
+
+  // What gets written to extraction_jobs.layout.
+  String get dbValue => switch (this) {
+        _LayoutPreset.upscPagePair => 'page_pair',
+        _LayoutPreset.samePage     => 'same_page',
+        _LayoutPreset.englishOnly   => 'single',
+      };
+
+  bool get wantHindi => this != _LayoutPreset.englishOnly;
+
+  // Default page knobs for a PDF. Images always override to 1 / 1 / 0.
+  (int start, int step, int offset) get pdfDefaults => switch (this) {
+        _LayoutPreset.upscPagePair => (3, 2, -1),
+        _LayoutPreset.samePage     => (1, 1, 0),
+        _LayoutPreset.englishOnly   => (1, 1, 0),
+      };
+}
+
 // ── New job sheet ─────────────────────────────────────────────────────────────
 
 class _NewJobSheet extends ConsumerStatefulWidget {
@@ -625,12 +671,12 @@ class _NewJobSheetState extends ConsumerState<_NewJobSheet> {
   String _examKey = 'UPSC CSE';
   String _paperKey = 'GS I';
   String _set = 'A';
+  _LayoutPreset _preset = _LayoutPreset.upscPagePair;
   final _year = TextEditingController(text: '');
   final _expected = TextEditingController(text: '100');
   final _startPage = TextEditingController(text: '3');
   final _pageStep = TextEditingController(text: '2');
   final _hindiOffset = TextEditingController(text: '-1');
-  bool _hindi = true;
   bool _advExpanded = false;
   PlatformFile? _pdf;
   bool _isImage = false;
@@ -638,6 +684,28 @@ class _NewJobSheetState extends ConsumerState<_NewJobSheet> {
   String? _err;
 
   static const _imageExts = {'png', 'jpg', 'jpeg'};
+
+  // Presets offered for the current file type. A single image can't have a
+  // separate Hindi page, so page_pair is hidden for images.
+  List<_LayoutPreset> get _availablePresets => _isImage
+      ? const [_LayoutPreset.samePage, _LayoutPreset.englishOnly]
+      : _LayoutPreset.values;
+
+  // Push the selected preset's page knobs into the advanced fields. Images are
+  // always a single page, so they pin start/step to 1 regardless of preset.
+  void _applyPreset(_LayoutPreset p) {
+    _preset = p;
+    final (start, step, offset) = p.pdfDefaults;
+    if (_isImage) {
+      _startPage.text = '1';
+      _pageStep.text = '1';
+      _hindiOffset.text = '0';
+    } else {
+      _startPage.text = '$start';
+      _pageStep.text = '$step';
+      _hindiOffset.text = '$offset';
+    }
+  }
 
   @override
   void dispose() {
@@ -667,11 +735,17 @@ class _NewJobSheetState extends ConsumerState<_NewJobSheet> {
         _pdf = file;
         _isImage = isImg;
         if (isImg) {
-          _hindi = false;
+          // An image is one page with an unknown question count. Default to the
+          // same-page bilingual scan; user can switch to English-only.
           _expected.text = '0';
+          if (!_availablePresets.contains(_preset)) {
+            _applyPreset(_LayoutPreset.samePage);
+          } else {
+            _applyPreset(_preset);
+          }
         } else {
-          _hindi = true;
           if (_expected.text == '0') _expected.text = '100';
+          _applyPreset(_preset);
         }
       });
     }
@@ -713,12 +787,13 @@ class _NewJobSheetState extends ConsumerState<_NewJobSheet> {
         'paper':          paperName,
         'paper_slug':     paperSlug,
         'paper_set':      _set,
+        'layout':         _preset.dbValue,
         'pdf_path':       path,
         'pdf_name':       _pdf!.name,
-        'want_hindi':     _hindi,
+        'want_hindi':     _preset.wantHindi,
         'expected_count': int.tryParse(_expected.text.trim()) ?? 0,
-        'start_page':     int.tryParse(_startPage.text.trim()) ?? 3,
-        'page_step':      int.tryParse(_pageStep.text.trim()) ?? 2,
+        'start_page':     int.tryParse(_startPage.text.trim()) ?? 1,
+        'page_step':      int.tryParse(_pageStep.text.trim()) ?? 1,
         'hindi_offset':   int.tryParse(_hindiOffset.text.trim()) ?? -1,
       });
       if (mounted) Navigator.pop(context);
@@ -876,85 +951,79 @@ class _NewJobSheetState extends ConsumerState<_NewJobSheet> {
             ),
             const SizedBox(height: 14),
 
-            // Expected Qs + Hindi toggle
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Expanded(
-                    child: _field('Expected Qs', _expected,
-                        number: true)),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      _sectionLabel('Hindi'),
-                      const SizedBox(height: 6),
-                      _PillToggle(
-                        value: _hindi,
-                        onChanged: _isImage
-                            ? null
-                            : (v) => setState(() => _hindi = v),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
+            // Layout preset
+            _sectionLabel('Layout'),
+            const SizedBox(height: 8),
+            ..._availablePresets.map((p) => _PresetCard(
+                  preset: p,
+                  selected: _preset == p,
+                  onTap: () => setState(() => _applyPreset(p)),
+                )),
             const SizedBox(height: 14),
 
-            // Advanced section
-            GestureDetector(
-              onTap: () =>
-                  setState(() => _advExpanded = !_advExpanded),
-              child: Container(
-                padding: const EdgeInsets.symmetric(
-                    horizontal: 12, vertical: 10),
-                decoration: BoxDecoration(
-                  color: AppPalette.grey100,
-                  borderRadius: BorderRadius.circular(8),
+            // Expected Qs (0 = extract whatever is present, e.g. a single image)
+            _field('Expected questions', _expected, number: true),
+            const SizedBox(height: 14),
+
+            // Advanced section — raw page knobs, pre-filled by the preset. Hidden
+            // for images (always a single page). Rarely needed for PDFs.
+            if (!_isImage) ...[
+              GestureDetector(
+                onTap: () =>
+                    setState(() => _advExpanded = !_advExpanded),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 12, vertical: 10),
+                  decoration: BoxDecoration(
+                    color: AppPalette.grey100,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Row(children: [
+                    const Icon(Icons.tune,
+                        size: 16, color: AppPalette.grey600),
+                    const SizedBox(width: 8),
+                    const Expanded(
+                      child: Text('Advanced page layout',
+                          style: TextStyle(
+                              fontSize: 13,
+                              color: AppPalette.grey600)),
+                    ),
+                    Icon(
+                      _advExpanded
+                          ? Icons.keyboard_arrow_up
+                          : Icons.keyboard_arrow_down,
+                      size: 18,
+                      color: AppPalette.grey400,
+                    ),
+                  ]),
                 ),
-                child: Row(children: [
-                  const Icon(Icons.tune,
-                      size: 16, color: AppPalette.grey600),
-                  const SizedBox(width: 8),
-                  const Expanded(
-                    child: Text('Advanced layout',
-                        style: TextStyle(
-                            fontSize: 13,
-                            color: AppPalette.grey600)),
-                  ),
-                  Icon(
-                    _advExpanded
-                        ? Icons.keyboard_arrow_up
-                        : Icons.keyboard_arrow_down,
-                    size: 18,
-                    color: AppPalette.grey400,
-                  ),
+              ),
+              if (_advExpanded) ...[
+                const SizedBox(height: 10),
+                Row(children: [
+                  Expanded(
+                      child: _field('Start page', _startPage,
+                          number: true)),
+                  const SizedBox(width: 10),
+                  Expanded(
+                      child: _field('Page step', _pageStep,
+                          number: true)),
+                  if (_preset == _LayoutPreset.upscPagePair) ...[
+                    const SizedBox(width: 10),
+                    Expanded(
+                        child: _field('Hindi offset', _hindiOffset,
+                            number: true)),
+                  ],
                 ]),
-              ),
-            ),
-            if (_advExpanded) ...[
-              const SizedBox(height: 10),
-              Row(children: [
-                Expanded(
-                    child: _field('Start page', _startPage,
-                        number: true)),
-                const SizedBox(width: 10),
-                Expanded(
-                    child: _field('Page step', _pageStep,
-                        number: true)),
-                const SizedBox(width: 10),
-                Expanded(
-                    child: _field('Hindi offset', _hindiOffset,
-                        number: true)),
-              ]),
-              const SizedBox(height: 6),
-              Text(
-                'UPSC bilingual papers: EN on odd pages (step 2 from page 3), HI at offset −1.',
-                style: theme.textTheme.bodySmall
-                    ?.copyWith(color: AppPalette.grey400, fontSize: 11),
-              ),
+                const SizedBox(height: 6),
+                Text(
+                  _preset == _LayoutPreset.upscPagePair
+                      ? 'UPSC: English on odd pages (step 2 from page 3), Hindi twin at offset −1.'
+                      : 'Set the first content page and the gap between pages to scan.',
+                  style: theme.textTheme.bodySmall
+                      ?.copyWith(color: AppPalette.grey400, fontSize: 11),
+                ),
+              ],
             ],
 
             if (_err != null) ...[
@@ -1069,54 +1138,64 @@ class _Chip extends StatelessWidget {
   }
 }
 
-// ── Pill toggle (On / Off) ────────────────────────────────────────────────────
+// ── Preset card ───────────────────────────────────────────────────────────────
 
-class _PillToggle extends StatelessWidget {
-  final bool value;
-  final ValueChanged<bool>? onChanged;
-  const _PillToggle({required this.value, required this.onChanged});
-
-  Widget _seg(String label, bool active, VoidCallback? onTap) {
-    return GestureDetector(
-      behavior: HitTestBehavior.opaque,
-      onTap: onTap,
-      child: Container(
-        padding:
-            const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-        color: active ? AppPalette.indigoLight : Colors.transparent,
-        child: Text(
-          label,
-          style: TextStyle(
-            fontSize: 12,
-            fontWeight: active ? FontWeight.w700 : FontWeight.w500,
-            color: active ? AppPalette.indigo : AppPalette.grey600,
-          ),
-        ),
-      ),
-    );
-  }
+class _PresetCard extends StatelessWidget {
+  final _LayoutPreset preset;
+  final bool selected;
+  final VoidCallback onTap;
+  const _PresetCard(
+      {required this.preset,
+      required this.selected,
+      required this.onTap});
 
   @override
   Widget build(BuildContext context) {
-    return Opacity(
-      opacity: onChanged == null ? 0.45 : 1.0,
+    return GestureDetector(
+      onTap: onTap,
       child: Container(
+        margin: const EdgeInsets.only(bottom: 8),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
         decoration: BoxDecoration(
-          border: Border.all(color: AppPalette.grey200),
-          borderRadius: BorderRadius.circular(999),
-        ),
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(999),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              _seg('Off', !value,
-                  onChanged != null ? () => onChanged!(false) : null),
-              _seg('On', value,
-                  onChanged != null ? () => onChanged!(true) : null),
-            ],
+          color: selected ? AppPalette.indigoLight : AppPalette.white,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(
+            color: selected ? AppPalette.indigo : AppPalette.grey200,
+            width: selected ? 1.5 : 1,
           ),
         ),
+        child: Row(children: [
+          Icon(preset.icon,
+              size: 20,
+              color: selected ? AppPalette.indigo : AppPalette.grey600),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(preset.title,
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      color: selected
+                          ? AppPalette.indigo
+                          : AppPalette.grey900,
+                    )),
+                const SizedBox(height: 1),
+                Text(preset.subtitle,
+                    style: const TextStyle(
+                        fontSize: 11, color: AppPalette.grey600)),
+              ],
+            ),
+          ),
+          Icon(
+            selected
+                ? Icons.radio_button_checked
+                : Icons.radio_button_unchecked,
+            size: 18,
+            color: selected ? AppPalette.indigo : AppPalette.grey300,
+          ),
+        ]),
       ),
     );
   }
