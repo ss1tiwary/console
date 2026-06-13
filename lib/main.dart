@@ -6,7 +6,7 @@ import 'app.dart';
 import 'core/theme/console_logo.dart';
 
 final _authConfig = AuthConfig(
-  appName: 'Resolve Console',
+  appName: 'PnAConsole',
   tagline: 'Editor access only',
   valueProps: const [],
   methods: const {AuthMethod.google},

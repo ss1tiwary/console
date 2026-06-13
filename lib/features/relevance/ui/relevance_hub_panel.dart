@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:resolve_theme/resolve_theme.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/di/providers.dart';
-import '../../../core/palette.dart';
 import '../../../core/spacing.dart';
 import 'relevance_review_screen.dart';
 
@@ -81,7 +81,7 @@ class _RelevanceHubPanelState
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Container(
-          color: AppPalette.white,
+          color: context.pal.white,
           padding: const EdgeInsets.fromLTRB(20, 16, 20, 12),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -96,7 +96,7 @@ class _RelevanceHubPanelState
                   hintText: 'Search posts…',
                   prefixIcon: const Icon(Icons.search, size: 18),
                   filled: true,
-                  fillColor: AppPalette.grey100,
+                  fillColor: context.pal.grey100,
                   contentPadding:
                       const EdgeInsets.symmetric(vertical: 10),
                   border: OutlineInputBorder(
@@ -108,7 +108,7 @@ class _RelevanceHubPanelState
             ],
           ),
         ),
-        const Divider(height: 1, color: AppPalette.grey200),
+        Divider(height: 1, color: context.pal.grey200),
         Expanded(
           child: postsAsync.when(
             loading: () =>
@@ -129,7 +129,7 @@ class _RelevanceHubPanelState
                         ? 'No posts found.'
                         : 'No posts matching "$_query".',
                     style: theme.textTheme.bodyMedium
-                        ?.copyWith(color: AppPalette.grey400),
+                        ?.copyWith(color: context.pal.grey400),
                   ),
                 );
               }
@@ -183,9 +183,9 @@ class _PostTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final (badgeColor, badgeLabel) = switch (post.relevanceScore) {
-      >= 70 => (AppPalette.green, 'HIGH'),
-      >= 40 => (AppPalette.amber, 'MED'),
-      _ => (AppPalette.grey400, 'LOW'),
+      >= 70 => (context.pal.green, 'HIGH'),
+      >= 40 => (context.pal.amber, 'MED'),
+      _ => (context.pal.grey400, 'LOW'),
     };
 
     return InkWell(
@@ -195,9 +195,9 @@ class _PostTile extends StatelessWidget {
         padding: const EdgeInsets.symmetric(
             horizontal: 14, vertical: 12),
         decoration: BoxDecoration(
-          color: AppPalette.white,
+          color: context.pal.white,
           borderRadius: BorderRadius.circular(10),
-          border: Border.all(color: AppPalette.grey200),
+          border: Border.all(color: context.pal.grey200),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -227,11 +227,11 @@ class _PostTile extends StatelessWidget {
                   child: Text(
                     _formatDate(post.publishedAt),
                     style: theme.textTheme.bodySmall
-                        ?.copyWith(color: AppPalette.grey400),
+                        ?.copyWith(color: context.pal.grey400),
                   ),
                 ),
-                const Icon(Icons.chevron_right,
-                    size: 16, color: AppPalette.grey400),
+                Icon(Icons.chevron_right,
+                    size: 16, color: context.pal.grey400),
               ],
             ),
             const SizedBox(height: 6),
@@ -244,9 +244,9 @@ class _PostTile extends StatelessWidget {
             ),
             const SizedBox(height: 6),
             Row(children: [
-              _ScorePill('P', post.prelimsScore, AppPalette.indigo),
+              _ScorePill('P', post.prelimsScore, context.pal.indigo),
               const SizedBox(width: 6),
-              _ScorePill('M', post.mainsScore, AppPalette.green),
+              _ScorePill('M', post.mainsScore, context.pal.green),
             ]),
           ],
         ),

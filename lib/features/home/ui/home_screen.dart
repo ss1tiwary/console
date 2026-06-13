@@ -1,12 +1,13 @@
 import 'package:flutter/material.dart';
+import 'package:resolve_theme/resolve_theme.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import '../../../core/palette.dart';
 import '../../../core/theme/console_logo.dart';
 import '../../dashboard/ui/dashboard_panel.dart';
 import '../../extraction/ui/extraction_panel.dart';
 import '../../feedback/ui/feedback_panel.dart';
 import '../../ideas/ui/ideas_panel.dart';
+import '../../jobs/ui/jobs_panel.dart';
 import '../../relevance/ui/relevance_hub_panel.dart';
 
 // ── Destinations ───────────────────────────────────────────────────────────────
@@ -14,6 +15,7 @@ import '../../relevance/ui/relevance_hub_panel.dart';
 enum _Dest {
   dashboard,
   extraction,
+  jobs,
   feedback,
   relevance,
   ideas;
@@ -21,6 +23,7 @@ enum _Dest {
   String get label => switch (this) {
         _Dest.dashboard => 'Dashboard',
         _Dest.extraction => 'Extraction',
+        _Dest.jobs       => 'Jobs',
         _Dest.feedback => 'Feedback',
         _Dest.relevance => 'Relevance',
         _Dest.ideas => 'Ideas',
@@ -29,6 +32,7 @@ enum _Dest {
   IconData get icon => switch (this) {
         _Dest.dashboard => Icons.dashboard_outlined,
         _Dest.extraction => Icons.document_scanner_outlined,
+        _Dest.jobs       => Icons.monitor_heart_outlined,
         _Dest.feedback => Icons.feedback_outlined,
         _Dest.relevance => Icons.rate_review_outlined,
         _Dest.ideas => Icons.lightbulb_outline,
@@ -37,6 +41,7 @@ enum _Dest {
   IconData get selectedIcon => switch (this) {
         _Dest.dashboard => Icons.dashboard,
         _Dest.extraction => Icons.document_scanner,
+        _Dest.jobs       => Icons.monitor_heart,
         _Dest.feedback => Icons.feedback,
         _Dest.relevance => Icons.rate_review,
         _Dest.ideas => Icons.lightbulb,
@@ -71,7 +76,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 
   Widget _wideLayout() {
     return Scaffold(
-      backgroundColor: AppPalette.grey50,
+      backgroundColor: context.pal.grey50,
       body: Row(
         children: [
           _SidebarContainer(current: _current, onSelect: _onSelect),
@@ -86,11 +91,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   Widget _narrowLayout() {
     return Scaffold(
       key: _scaffoldKey,
-      backgroundColor: AppPalette.grey50,
+      backgroundColor: context.pal.grey50,
       appBar: _narrowAppBar(),
       drawer: Drawer(
         width: 260,
-        backgroundColor: AppPalette.white,
+        backgroundColor: context.pal.white,
         child: _SidebarContent(
           current: _current,
           onSelect: (d) {
@@ -99,21 +104,21 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           },
         ),
       ),
-      body: _panel(),
+      body: SafeArea(top: false, child: _panel()),
     );
   }
 
   PreferredSizeWidget _narrowAppBar() {
     return AppBar(
-      backgroundColor: AppPalette.white,
+      backgroundColor: context.pal.white,
       elevation: 0,
       scrolledUnderElevation: 0,
       surfaceTintColor: Colors.transparent,
       title: const ConsoleLogo(size: 32),
-      iconTheme: const IconThemeData(color: AppPalette.grey600),
+      iconTheme: IconThemeData(color: context.pal.grey600),
       bottom: PreferredSize(
         preferredSize: const Size.fromHeight(0.5),
-        child: Container(height: 0.5, color: AppPalette.grey200),
+        child: Container(height: 0.5, color: context.pal.grey200),
       ),
     );
   }
@@ -121,11 +126,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   // ── Panel router ───────────────────────────────────────────────────────────
 
   Widget _panel() => switch (_current) {
-        _Dest.dashboard => const DashboardPanel(),
+        _Dest.dashboard  => const DashboardPanel(),
         _Dest.extraction => const ExtractionPanel(),
-        _Dest.feedback => const FeedbackPanel(),
-        _Dest.relevance => const RelevanceHubPanel(),
-        _Dest.ideas => const IdeasPanel(),
+        _Dest.jobs       => const JobsPanel(),
+        _Dest.feedback   => const FeedbackPanel(),
+        _Dest.relevance  => const RelevanceHubPanel(),
+        _Dest.ideas      => const IdeasPanel(),
       };
 }
 
@@ -141,9 +147,9 @@ class _SidebarContainer extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       width: 232,
-      decoration: const BoxDecoration(
-        color: AppPalette.white,
-        border: Border(right: BorderSide(color: AppPalette.grey200)),
+      decoration: BoxDecoration(
+        color: context.pal.white,
+        border: Border(right: BorderSide(color: context.pal.grey200)),
       ),
       child: _SidebarContent(current: current, onSelect: onSelect),
     );
@@ -152,29 +158,36 @@ class _SidebarContainer extends StatelessWidget {
 
 // ── Sidebar content (shared between fixed sidebar and Drawer) ──────────────────
 
-class _SidebarContent extends StatelessWidget {
+class _SidebarContent extends ConsumerWidget {
   final _Dest current;
   final ValueChanged<_Dest> onSelect;
   const _SidebarContent(
       {required this.current, required this.onSelect});
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final user = Supabase.instance.client.auth.currentUser;
     final displayName = user?.userMetadata?['full_name'] as String? ??
         user?.userMetadata?['name'] as String?;
     final email = user?.email ?? '';
     final avatarUrl = user?.userMetadata?['avatar_url'] as String?;
 
-    return Column(
+    return SafeArea(
+      top: false,
+      child: Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        // Header
-        Padding(
-          padding: const EdgeInsets.fromLTRB(20, 20, 20, 16),
-          child: const ConsoleLogo(size: 36),
+        // Header. Align keeps the square logo at its intrinsic size — the parent
+        // Column is CrossAxisAlignment.stretch, which would otherwise force the
+        // logo to full drawer width and BoxFit.cover would crop it.
+        const Padding(
+          padding: EdgeInsets.fromLTRB(20, 20, 20, 16),
+          child: Align(
+            alignment: Alignment.centerLeft,
+            child: ConsoleLogo(size: 36),
+          ),
         ),
-        const Divider(height: 1, color: AppPalette.grey100),
+        Divider(height: 1, color: context.pal.grey100),
         const SizedBox(height: 8),
         // Section label
         Padding(
@@ -185,7 +198,7 @@ class _SidebarContent extends StatelessWidget {
               fontSize: 10,
               fontWeight: FontWeight.w700,
               letterSpacing: 1.2,
-              color: AppPalette.grey400,
+              color: context.pal.grey400,
             ),
           ),
         ),
@@ -197,7 +210,7 @@ class _SidebarContent extends StatelessWidget {
             onTap: () => onSelect(dest),
           ),
         const Spacer(),
-        const Divider(height: 1, color: AppPalette.grey100),
+        Divider(height: 1, color: context.pal.grey100),
         // User footer
         Padding(
           padding: const EdgeInsets.fromLTRB(14, 12, 14, 16),
@@ -211,17 +224,17 @@ class _SidebarContent extends StatelessWidget {
                   if (displayName != null)
                     Text(
                       displayName,
-                      style: const TextStyle(
+                      style: TextStyle(
                           fontSize: 12,
                           fontWeight: FontWeight.w600,
-                          color: AppPalette.grey900),
+                          color: context.pal.grey900),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),
                   Text(
                     email,
-                    style: const TextStyle(
-                        fontSize: 11, color: AppPalette.grey400),
+                    style: TextStyle(
+                        fontSize: 11, color: context.pal.grey400),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                   ),
@@ -230,9 +243,18 @@ class _SidebarContent extends StatelessWidget {
             ),
             const SizedBox(width: 4),
             IconButton(
+              icon: Icon(_themeIcon(ref.watch(themeModeProvider)), size: 16),
+              tooltip: 'Appearance',
+              color: context.pal.grey400,
+              padding: EdgeInsets.zero,
+              constraints:
+                  const BoxConstraints(minWidth: 28, minHeight: 28),
+              onPressed: () => _cycleThemeMode(ref),
+            ),
+            IconButton(
               icon: const Icon(Icons.logout_rounded, size: 16),
               tooltip: 'Sign out',
-              color: AppPalette.grey400,
+              color: context.pal.grey400,
               padding: EdgeInsets.zero,
               constraints:
                   const BoxConstraints(minWidth: 28, minHeight: 28),
@@ -242,8 +264,26 @@ class _SidebarContent extends StatelessWidget {
           ]),
         ),
       ],
-    );
+    ));
   }
+}
+
+// ── Theme-mode toggle (cycles light → dark → system) ───────────────────────────
+
+IconData _themeIcon(ThemeMode m) => switch (m) {
+      ThemeMode.light => Icons.light_mode_outlined,
+      ThemeMode.dark => Icons.dark_mode_outlined,
+      ThemeMode.system => Icons.brightness_auto_outlined,
+    };
+
+void _cycleThemeMode(WidgetRef ref) {
+  final current = ref.read(themeModeProvider);
+  final next = switch (current) {
+    ThemeMode.light => ThemeMode.dark,
+    ThemeMode.dark => ThemeMode.system,
+    ThemeMode.system => ThemeMode.light,
+  };
+  ref.read(themeModeProvider.notifier).set(next);
 }
 
 // ── Nav item ───────────────────────────────────────────────────────────────────
@@ -278,9 +318,9 @@ class _NavItemState extends State<_NavItem> {
               const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
           decoration: BoxDecoration(
             color: sel
-                ? AppPalette.indigo
+                ? context.pal.indigo
                 : _hovered
-                    ? AppPalette.grey100
+                    ? context.pal.grey100
                     : Colors.transparent,
             borderRadius: BorderRadius.circular(8),
           ),
@@ -288,7 +328,7 @@ class _NavItemState extends State<_NavItem> {
             Icon(
               sel ? widget.dest.selectedIcon : widget.dest.icon,
               size: 18,
-              color: sel ? AppPalette.white : AppPalette.grey600,
+              color: sel ? context.pal.white : context.pal.grey600,
             ),
             const SizedBox(width: 10),
             Text(
@@ -297,7 +337,7 @@ class _NavItemState extends State<_NavItem> {
                 fontSize: 13,
                 fontWeight:
                     sel ? FontWeight.w600 : FontWeight.w400,
-                color: sel ? AppPalette.white : AppPalette.grey700,
+                color: sel ? context.pal.white : context.pal.grey700,
               ),
             ),
           ]),
@@ -320,19 +360,19 @@ class _Avatar extends StatelessWidget {
       return CircleAvatar(
         radius: 16,
         backgroundImage: NetworkImage(url!),
-        backgroundColor: AppPalette.grey100,
+        backgroundColor: context.pal.grey100,
       );
     }
     final initial = name.isNotEmpty ? name[0].toUpperCase() : '?';
     return CircleAvatar(
       radius: 16,
-      backgroundColor: AppPalette.indigoLight,
+      backgroundColor: context.pal.indigoLight,
       child: Text(
         initial,
-        style: const TextStyle(
+        style: TextStyle(
           fontSize: 13,
           fontWeight: FontWeight.w700,
-          color: AppPalette.indigo,
+          color: context.pal.indigo,
         ),
       ),
     );

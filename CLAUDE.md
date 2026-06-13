@@ -13,7 +13,7 @@ the app only reads role, never sets it.
 console/
   lib/
     main.dart                 # Supabase init, ProviderScope
-    app.dart                  # ConsoleApp (MaterialApp.router, ConsoleTheme)
+    app.dart                  # ConsoleApp (MaterialApp.router, ResolveTheme light/dark + themeMode)
     core/
       theme/console_theme.dart  # ThemeData + QbankTheme.standard extension
       di/providers.dart         # supabaseClient, authUser, editorRole, isEditor
@@ -36,10 +36,15 @@ console/
   access is a Supabase dashboard / service-role operation.
 - **Secrets:** `service_role` key is never in this app. Same rule as PIBrief.
 - **`qbank_ui` renderer is shared.** Import from `package:qbank_ui/qbank_ui.dart`; never
-  copy widget code here. `ConsoleTheme.light` registers `QbankTheme.standard` so the renderer
-  works out of the box.
-- **Platform targets: web + Windows only.** No Android/iOS. `file_picker` compileSdk 36
-  constraint never applies here.
+  copy widget code here. `ResolveTheme` (from `package:resolve_theme`) registers a brand-aware
+  `QbankTheme` for light + dark, so the renderer follows the active theme out of the box.
+- **Colour lives in `resolve_theme`, not here.** There is no local palette — the old
+  `core/palette.dart` and `core/theme/console_theme.dart` are deleted. Read colours via
+  `Theme.of(context).colorScheme.*` and `context.appColors.*`; `context.pal.*` is a legacy
+  migration accessor. Rebrand/dark-tuning happens in `packages/resolve_theme` only.
+- **Platform target: Android today** (builds + installs as an APK). Web + Windows are **future
+  dev** (planned, not the current surface). Because Android is live, the `file_picker` compileSdk
+  36 constraint **applies** — keep it set in `android/app/build.gradle.kts`.
 - **Docs are part of the change** — any new feature updates this file or `../ECOSYSTEM.md` in
   the same commit (`../DOCUMENTATION.md` §10).
 
@@ -55,7 +60,7 @@ Read [`../PRINCIPLES.md`](../PRINCIPLES.md) before writing any code. The most re
 
 | Layer | Choice |
 |---|---|
-| App | Flutter (web + Windows) · Riverpod · GoRouter |
+| App | Flutter (Android today; web + Windows planned) · Riverpod · GoRouter |
 | Auth | Supabase magic-link OTP (same project as platform) |
 | DB | Direct Supabase queries — no local drift cache needed for admin tools |
 | Renderer | `packages/qbank_ui` (shared, path dep) |

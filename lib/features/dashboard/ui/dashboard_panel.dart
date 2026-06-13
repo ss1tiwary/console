@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:resolve_theme/resolve_theme.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/di/providers.dart';
-import '../../../core/palette.dart';
 import '../../../core/spacing.dart';
 import '../../feedback/data/feedback_model.dart';
 
@@ -33,12 +33,10 @@ class _FeedItem {
   final String text;
   final DateTime time;
   final String source;
-  final Color dotColor;
   const _FeedItem({
     required this.text,
     required this.time,
     required this.source,
-    required this.dotColor,
   });
 }
 
@@ -142,7 +140,6 @@ final _activityProvider =
       text: 'User feedback: ${type.label}',
       time: t,
       source: 'Feedback',
-      dotColor: AppPalette.amber,
     ));
   }
 
@@ -153,7 +150,6 @@ final _activityProvider =
       text: 'Relevance review saved',
       time: t,
       source: 'Relevance',
-      dotColor: AppPalette.green,
     ));
   }
 
@@ -167,7 +163,6 @@ final _activityProvider =
       text: 'Extraction $status — $year $paper',
       time: t,
       source: 'Extraction',
-      dotColor: AppPalette.indigo,
     ));
   }
 
@@ -198,7 +193,7 @@ class DashboardPanel extends ConsumerWidget {
               statsAsync.when(
                 loading: () => const _StatsShimmer(),
                 error: (e, _) => _ErrorBanner('Could not load stats: $e'),
-                data: (s) => _buildStatGrid(s, wide),
+                data: (s) => _buildStatGrid(context, s, wide),
               ),
               const SizedBox(height: 24),
               if (wide)
@@ -275,26 +270,26 @@ class DashboardPanel extends ConsumerWidget {
         const SizedBox(height: 3),
         Text(dateStr,
             style: theme.textTheme.bodySmall
-                ?.copyWith(color: AppPalette.grey400)),
+                ?.copyWith(color: context.pal.grey400)),
       ],
     );
   }
 
-  Widget _buildStatGrid(_DashStats s, bool wide) {
+  Widget _buildStatGrid(BuildContext context, _DashStats s, bool wide) {
     final cards = [
       _StatCard(
         icon: Icons.article_outlined,
         label: 'Posts today',
         value: '${s.postsToday}',
         sub: '${s.postsThisWeek} this week',
-        iconColor: AppPalette.indigo,
+        iconColor: context.pal.indigo,
       ),
       _StatCard(
         icon: Icons.feedback_outlined,
         label: 'Feedback pending',
         value: '${s.feedbackPending}',
         sub: 'needs attention',
-        iconColor: AppPalette.amber,
+        iconColor: context.pal.amber,
         highlight: s.feedbackPending > 0,
       ),
       _StatCard(
@@ -302,7 +297,7 @@ class DashboardPanel extends ConsumerWidget {
         label: 'Reviews done',
         value: '${s.reviewsDone}',
         sub: 'all time',
-        iconColor: AppPalette.green,
+        iconColor: context.pal.green,
       ),
       _StatCard(
         icon: Icons.lightbulb_outline,
@@ -333,7 +328,7 @@ class DashboardPanel extends ConsumerWidget {
               padding: const EdgeInsets.symmetric(vertical: 12),
               child: Text('No recent activity.',
                   style: theme.textTheme.bodySmall
-                      ?.copyWith(color: AppPalette.grey400)),
+                      ?.copyWith(color: context.pal.grey400)),
             )
           : Column(
               children: items
@@ -402,10 +397,10 @@ class _StatCard extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: AppPalette.white,
+        color: context.pal.white,
         borderRadius: BorderRadius.circular(AppSpacing.cardRadius),
         border: Border.all(
-          color: highlight ? AppPalette.amber : AppPalette.grey200,
+          color: highlight ? context.pal.amber : context.pal.grey200,
           width: highlight ? 1.5 : 1,
         ),
       ),
@@ -421,7 +416,7 @@ class _StatCard extends StatelessWidget {
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: theme.textTheme.bodySmall
-                      ?.copyWith(color: AppPalette.grey600, fontSize: 11)),
+                      ?.copyWith(color: context.pal.grey600, fontSize: 11)),
             ),
           ]),
           const SizedBox(height: 8),
@@ -429,13 +424,13 @@ class _StatCard extends StatelessWidget {
               style: theme.textTheme.headlineMedium?.copyWith(
                   fontWeight: FontWeight.w700,
                   fontSize: 28,
-                  color: AppPalette.grey900)),
+                  color: context.pal.grey900)),
           const SizedBox(height: 2),
           Text(sub,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: theme.textTheme.bodySmall
-                  ?.copyWith(color: AppPalette.grey400, fontSize: 11)),
+                  ?.copyWith(color: context.pal.grey400, fontSize: 11)),
         ],
       ),
     );
@@ -456,9 +451,9 @@ class _SectionCard extends StatelessWidget {
       width: double.infinity,
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: AppPalette.white,
+        color: context.pal.white,
         borderRadius: BorderRadius.circular(AppSpacing.cardRadius),
-        border: Border.all(color: AppPalette.grey200),
+        border: Border.all(color: context.pal.grey200),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -475,6 +470,14 @@ class _SectionCard extends StatelessWidget {
 }
 
 // ── Activity feed row ──────────────────────────────────────────────────────────
+
+/// Activity-feed dot colour by source (resolved from the active theme).
+Color _sourceColor(BuildContext context, String source) => switch (source) {
+      'Feedback' => context.pal.amber,
+      'Relevance' => context.pal.green,
+      'Extraction' => context.pal.indigo,
+      _ => context.pal.grey400,
+    };
 
 class _FeedRow extends StatelessWidget {
   final _FeedItem item;
@@ -499,7 +502,8 @@ class _FeedRow extends StatelessWidget {
             width: 7,
             height: 7,
             decoration: BoxDecoration(
-                color: item.dotColor, shape: BoxShape.circle),
+                color: _sourceColor(context, item.source),
+                shape: BoxShape.circle),
           ),
         ),
         const SizedBox(width: 10),
@@ -509,13 +513,13 @@ class _FeedRow extends StatelessWidget {
             children: [
               Text(item.text,
                   style: theme.textTheme.bodySmall?.copyWith(
-                      color: AppPalette.grey900, height: 1.4),
+                      color: context.pal.grey900, height: 1.4),
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis),
               const SizedBox(height: 2),
               Text('$timeLabel · ${item.source}',
                   style: theme.textTheme.bodySmall
-                      ?.copyWith(color: AppPalette.grey400, fontSize: 10)),
+                      ?.copyWith(color: context.pal.grey400, fontSize: 10)),
             ],
           ),
         ),
@@ -543,13 +547,13 @@ class _PipeRow extends StatelessWidget {
         Expanded(
           child: Text(label,
               style: theme.textTheme.bodySmall
-                  ?.copyWith(color: AppPalette.grey600)),
+                  ?.copyWith(color: context.pal.grey600)),
         ),
         Row(mainAxisSize: MainAxisSize.min, children: [
           Text(value,
               style: theme.textTheme.bodySmall?.copyWith(
                   fontWeight: FontWeight.w600,
-                  color: AppPalette.grey900)),
+                  color: context.pal.grey900)),
           if (badge != _PipeBadge.none) ...[
             const SizedBox(width: 6),
             _BadgeChip(badge),
@@ -567,11 +571,11 @@ class _BadgeChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final (label, color, bg) = switch (badge) {
-      _PipeBadge.ok => ('OK', AppPalette.green, AppPalette.greenLight),
+      _PipeBadge.ok => ('OK', context.pal.green, context.pal.greenLight),
       _PipeBadge.warn =>
-        ('HIGH', AppPalette.amber, AppPalette.amberLight),
-      _PipeBadge.err => ('ERR', AppPalette.red, AppPalette.redLight),
-      _PipeBadge.none => ('', AppPalette.grey400, AppPalette.grey100),
+        ('HIGH', context.pal.amber, context.pal.amberLight),
+      _PipeBadge.err => ('ERR', context.pal.red, context.pal.redLight),
+      _PipeBadge.none => ('', context.pal.grey400, context.pal.grey100),
     };
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
@@ -602,7 +606,7 @@ class _StatsShimmer extends StatelessWidget {
         4,
         (_) => Container(
           decoration: BoxDecoration(
-            color: AppPalette.grey100,
+            color: context.pal.grey100,
             borderRadius: BorderRadius.circular(AppSpacing.cardRadius),
           ),
         ),
@@ -622,11 +626,11 @@ class _ErrorBanner extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: AppPalette.redLight,
+        color: context.pal.redLight,
         borderRadius: BorderRadius.circular(8),
       ),
       child: Text(message,
-          style: const TextStyle(color: AppPalette.red, fontSize: 12)),
+          style: TextStyle(color: context.pal.red, fontSize: 12)),
     );
   }
 }

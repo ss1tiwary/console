@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:resolve_theme/resolve_theme.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../../../core/palette.dart';
 import '../../../core/spacing.dart';
 import '../../../core/di/providers.dart';
 
@@ -74,7 +74,7 @@ class _IdeasPanelState extends ConsumerState<IdeasPanel> {
       children: [
         // Header
         Container(
-          color: AppPalette.white,
+          color: context.pal.white,
           padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
           child: Row(
             children: [
@@ -84,7 +84,7 @@ class _IdeasPanelState extends ConsumerState<IdeasPanel> {
               const Spacer(),
               FilledButton.icon(
                 style: FilledButton.styleFrom(
-                    backgroundColor: AppPalette.indigo),
+                    backgroundColor: context.pal.indigo),
                 icon: const Icon(Icons.add, size: 18),
                 label: const Text('New idea'),
                 onPressed: () {
@@ -185,7 +185,7 @@ class _IdeasPanelState extends ConsumerState<IdeasPanel> {
                               child: Text('No ideas here.',
                                   style: theme.textTheme.bodyMedium
                                       ?.copyWith(
-                                          color: AppPalette.grey400)),
+                                          color: context.pal.grey400)),
                             ),
                           )
                         : SliverPadding(
@@ -225,7 +225,7 @@ class _IdeasPanelState extends ConsumerState<IdeasPanel> {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      backgroundColor: AppPalette.white,
+      backgroundColor: context.pal.white,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
       ),
@@ -282,9 +282,9 @@ class _IdeaCard extends StatelessWidget {
             horizontal: AppSpacing.pagePadding, vertical: 5),
         padding: const EdgeInsets.all(14),
         decoration: BoxDecoration(
-          color: AppPalette.white,
+          color: context.pal.white,
           borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: AppPalette.grey200),
+          border: Border.all(color: context.pal.grey200),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -296,32 +296,32 @@ class _IdeaCard extends StatelessWidget {
                         fontWeight: FontWeight.w700, height: 1.3)),
               ),
               const SizedBox(width: 8),
-              _priorityDot(idea.priority),
+              _priorityDot(context, idea.priority),
             ]),
             if (idea.body != null && idea.body!.isNotEmpty) ...[
               const SizedBox(height: 5),
               Text(idea.body!,
                   style: theme.textTheme.bodySmall?.copyWith(
-                      color: AppPalette.grey600, height: 1.4),
+                      color: context.pal.grey600, height: 1.4),
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis),
             ],
             const SizedBox(height: 9),
             Row(children: [
               _chip(
-                  idea.appName, AppPalette.indigo, AppPalette.indigoLight),
+                  idea.appName, context.pal.indigo, context.pal.indigoLight),
               if (idea.category != null) ...[
                 const SizedBox(width: 5),
-                _chip(idea.category!, AppPalette.grey600,
-                    AppPalette.grey100),
+                _chip(idea.category!, context.pal.grey600,
+                    context.pal.grey100),
               ],
               const SizedBox(width: 5),
-              _statusChip(idea.status),
+              _statusChip(context, idea.status),
               const Spacer(),
               Text(
                 _dateLabel(idea.createdAt),
                 style: theme.textTheme.bodySmall?.copyWith(
-                    color: AppPalette.grey400, fontSize: 11),
+                    color: context.pal.grey400, fontSize: 11),
               ),
             ]),
           ],
@@ -330,11 +330,11 @@ class _IdeaCard extends StatelessWidget {
     );
   }
 
-  Widget _priorityDot(String p) {
+  Widget _priorityDot(BuildContext context, String p) {
     final color = switch (p) {
       'high' => const Color(0xFFDC2626),
-      'medium' => AppPalette.amber,
-      _ => AppPalette.grey400,
+      'medium' => context.pal.amber,
+      _ => context.pal.grey400,
     };
     return Container(
       width: 8,
@@ -354,14 +354,14 @@ class _IdeaCard extends StatelessWidget {
                 color: text)),
       );
 
-  Widget _statusChip(String s) {
+  Widget _statusChip(BuildContext context, String s) {
     final (label, color, bg) = switch (s) {
-      'open' => ('Open', AppPalette.indigo, AppPalette.indigoLight),
+      'open' => ('Open', context.pal.indigo, context.pal.indigoLight),
       'in_progress' =>
-        ('In Progress', AppPalette.amber, AppPalette.amberLight),
+        ('In Progress', context.pal.amber, context.pal.amberLight),
       'done' =>
         ('Done', const Color(0xFF16A34A), const Color(0xFFDCFCE7)),
-      _ => ('Dropped', AppPalette.grey600, AppPalette.grey100),
+      _ => ('Dropped', context.pal.grey600, context.pal.grey100),
     };
     return _chip(label, color, bg);
   }
@@ -473,7 +473,7 @@ class _IdeaSheetState extends ConsumerState<_IdeaSheet> {
               height: 4,
               margin: const EdgeInsets.only(bottom: 16),
               decoration: BoxDecoration(
-                color: AppPalette.grey200,
+                color: context.pal.grey200,
                 borderRadius: BorderRadius.circular(2),
               ),
             ),
@@ -528,7 +528,7 @@ class _IdeaSheetState extends ConsumerState<_IdeaSheet> {
               IconButton(
                 onPressed: widget.onDeleted,
                 icon: const Icon(Icons.delete_outline),
-                color: AppPalette.red,
+                color: context.pal.red,
               ),
               const Spacer(),
             ] else
@@ -540,7 +540,7 @@ class _IdeaSheetState extends ConsumerState<_IdeaSheet> {
             const SizedBox(width: 8),
             FilledButton(
               style: FilledButton.styleFrom(
-                  backgroundColor: AppPalette.indigo),
+                  backgroundColor: context.pal.indigo),
               onPressed: _saving ? null : _save,
               child: _saving
                   ? const SizedBox(
@@ -584,7 +584,7 @@ class _IdeaSheetState extends ConsumerState<_IdeaSheet> {
   InputDecoration _decoration(String hint) => InputDecoration(
         hintText: hint,
         filled: true,
-        fillColor: AppPalette.grey100,
+        fillColor: context.pal.grey100,
         contentPadding: const EdgeInsets.symmetric(
             vertical: 10, horizontal: 14),
         border: OutlineInputBorder(
@@ -619,18 +619,18 @@ class _FilterChip extends StatelessWidget {
         padding: EdgeInsets.symmetric(
             horizontal: small ? 10 : 14, vertical: small ? 4 : 6),
         decoration: BoxDecoration(
-          color: selected ? AppPalette.indigo : AppPalette.white,
+          color: selected ? context.pal.indigo : context.pal.white,
           borderRadius:
               BorderRadius.circular(AppSpacing.chipRadius),
           border: Border.all(
               color: selected
-                  ? AppPalette.indigo
-                  : AppPalette.grey200),
+                  ? context.pal.indigo
+                  : context.pal.grey200),
         ),
         child: Text(
           label,
           style: TextStyle(
-            color: selected ? AppPalette.white : AppPalette.grey600,
+            color: selected ? context.pal.white : context.pal.grey600,
             fontSize: small ? 12 : 13,
             fontWeight: FontWeight.w500,
           ),
@@ -662,12 +662,12 @@ class _DropdownField extends StatelessWidget {
             style: Theme.of(context)
                 .textTheme
                 .labelSmall
-                ?.copyWith(color: AppPalette.grey600)),
+                ?.copyWith(color: context.pal.grey600)),
         const SizedBox(height: 4),
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 12),
           decoration: BoxDecoration(
-            color: AppPalette.grey100,
+            color: context.pal.grey100,
             borderRadius: BorderRadius.circular(10),
           ),
           child: DropdownButtonHideUnderline(

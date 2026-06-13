@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:resolve_theme/resolve_theme.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/di/providers.dart';
-import '../../../core/palette.dart';
 
 // ── Data model ────────────────────────────────────────────────────────────────
 
@@ -216,7 +216,7 @@ class _RelevanceReviewScreenState
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('Save failed: $e'),
-            backgroundColor: AppPalette.red,
+            backgroundColor: context.pal.red,
           ),
         );
       }
@@ -265,7 +265,7 @@ class _RelevanceReviewScreenState
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              _GroupLabel('Prelims Track', AppPalette.indigo),
+              _GroupLabel('Prelims Track', context.pal.indigo),
               const SizedBox(height: 4),
               _DimRow(
                 label: 'Syllabus match',
@@ -319,7 +319,7 @@ class _RelevanceReviewScreenState
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              _GroupLabel('Mains Track', AppPalette.green),
+              _GroupLabel('Mains Track', context.pal.green),
               const SizedBox(height: 4),
               _DimRow(
                 label: 'Syllabus match',
@@ -373,7 +373,7 @@ class _RelevanceReviewScreenState
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              _GroupLabel('Shelf Life', AppPalette.amber),
+              _GroupLabel('Shelf Life', context.pal.amber),
               const SizedBox(height: 12),
               _ShelfLifeRow(
                 aiVal: ai.shelfLife,
@@ -389,7 +389,7 @@ class _RelevanceReviewScreenState
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              _GroupLabel('Justification', AppPalette.grey600),
+              _GroupLabel('Justification', context.pal.grey600),
               const SizedBox(height: 10),
               TextField(
                 controller: _justController,
@@ -450,27 +450,27 @@ class _TotalsBanner extends StatelessWidget {
       padding: const EdgeInsets.symmetric(
           horizontal: 16, vertical: 12),
       decoration: BoxDecoration(
-        color: AppPalette.white,
+        color: context.pal.white,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: AppPalette.grey200),
+        border: Border.all(color: context.pal.grey200),
       ),
       child: Row(children: [
         _TotalCol('PRELIMS', aiPrelims, humanPrelims),
-        _divider(),
+        _divider(context),
         _TotalCol('MAINS', aiMains, humanMains),
-        _divider(),
+        _divider(context),
         _TotalCol('RELEVANCE', aiRelevance, humanRelevance,
             highlight: true),
       ]),
     );
   }
 
-  Widget _divider() => Container(
+  Widget _divider(BuildContext context) => Container(
         width: 1,
         height: 40,
         margin:
             const EdgeInsets.symmetric(horizontal: 12),
-        color: AppPalette.grey200,
+        color: context.pal.grey200,
       );
 }
 
@@ -485,18 +485,18 @@ class _TotalCol extends StatelessWidget {
   Widget build(BuildContext context) {
     final diff = human - ai;
     final diffColor = diff > 0
-        ? AppPalette.green
+        ? context.pal.green
         : diff < 0
-            ? AppPalette.red
-            : AppPalette.grey400;
+            ? context.pal.red
+            : context.pal.grey400;
     return Expanded(
       child: Column(children: [
         Text(label,
-            style: const TextStyle(
+            style: TextStyle(
                 fontSize: 9,
                 letterSpacing: 0.8,
                 fontWeight: FontWeight.w700,
-                color: AppPalette.grey400)),
+                color: context.pal.grey400)),
         const SizedBox(height: 4),
         Row(
           mainAxisAlignment: MainAxisAlignment.center,
@@ -509,14 +509,14 @@ class _TotalCol extends StatelessWidget {
                   fontSize: highlight ? 22 : 18,
                   fontWeight: FontWeight.w800,
                   color: highlight
-                      ? AppPalette.indigo
-                      : AppPalette.grey900),
+                      ? context.pal.indigo
+                      : context.pal.grey900),
             ),
             const SizedBox(width: 4),
             Text('/ $ai',
-                style: const TextStyle(
+                style: TextStyle(
                     fontSize: 11,
-                    color: AppPalette.grey400)),
+                    color: context.pal.grey400)),
           ],
         ),
         if (diff != 0)
@@ -570,11 +570,11 @@ class _DimRow extends StatelessWidget {
                       style: theme.textTheme.bodySmall?.copyWith(
                           fontWeight: FontWeight.w600,
                           color: readOnly
-                              ? AppPalette.grey400
-                              : AppPalette.grey900)),
+                              ? context.pal.grey400
+                              : context.pal.grey900)),
                   Text(hint,
                       style: theme.textTheme.bodySmall?.copyWith(
-                          color: AppPalette.grey400,
+                          color: context.pal.grey400,
                           fontSize: 11)),
                 ],
               ),
@@ -583,13 +583,13 @@ class _DimRow extends StatelessWidget {
               padding: const EdgeInsets.symmetric(
                   horizontal: 8, vertical: 4),
               decoration: BoxDecoration(
-                color: AppPalette.grey100,
+                color: context.pal.grey100,
                 borderRadius: BorderRadius.circular(6),
               ),
               child: Text('AI: $aiVal / $maxVal',
-                  style: const TextStyle(
+                  style: TextStyle(
                       fontSize: 11,
-                      color: AppPalette.grey600,
+                      color: context.pal.grey600,
                       fontWeight: FontWeight.w600)),
             ),
             const SizedBox(width: 8),
@@ -600,8 +600,8 @@ class _DimRow extends StatelessWidget {
                   style: theme.textTheme.bodyMedium?.copyWith(
                       fontWeight: FontWeight.w800,
                       color: readOnly
-                          ? AppPalette.grey400
-                          : AppPalette.indigo)),
+                          ? context.pal.grey400
+                          : context.pal.indigo)),
             ),
           ]),
           if (!readOnly) ...[
@@ -615,10 +615,10 @@ class _DimRow extends StatelessWidget {
                 overlayShape:
                     const RoundSliderOverlayShape(
                         overlayRadius: 14),
-                activeTrackColor: AppPalette.indigo,
-                thumbColor: AppPalette.indigo,
-                overlayColor: AppPalette.indigoLight,
-                inactiveTrackColor: AppPalette.grey200,
+                activeTrackColor: context.pal.indigo,
+                thumbColor: context.pal.indigo,
+                overlayColor: context.pal.indigoLight,
+                inactiveTrackColor: context.pal.grey200,
               ),
               child: Slider(
                 value: humanVal.toDouble(),
@@ -630,7 +630,7 @@ class _DimRow extends StatelessWidget {
               ),
             ),
           ],
-          const Divider(height: 1, color: AppPalette.grey100),
+          Divider(height: 1, color: context.pal.grey100),
         ],
       ),
     );
@@ -664,13 +664,13 @@ class _ShelfLifeRow extends StatelessWidget {
             padding: const EdgeInsets.symmetric(
                 horizontal: 8, vertical: 4),
             decoration: BoxDecoration(
-              color: AppPalette.grey100,
+              color: context.pal.grey100,
               borderRadius: BorderRadius.circular(6),
             ),
             child: Text('AI: $aiVal',
-                style: const TextStyle(
+                style: TextStyle(
                     fontSize: 11,
-                    color: AppPalette.grey600,
+                    color: context.pal.grey600,
                     fontWeight: FontWeight.w600)),
           ),
         ]),
@@ -688,8 +688,8 @@ class _ShelfLifeRow extends StatelessWidget {
                       const EdgeInsets.symmetric(vertical: 10),
                   decoration: BoxDecoration(
                     color: selected
-                        ? AppPalette.indigo
-                        : AppPalette.grey100,
+                        ? context.pal.indigo
+                        : context.pal.grey100,
                     borderRadius: BorderRadius.circular(8),
                   ),
                   alignment: Alignment.center,
@@ -700,8 +700,8 @@ class _ShelfLifeRow extends StatelessWidget {
                       fontSize: 12,
                       fontWeight: FontWeight.w600,
                       color: selected
-                          ? AppPalette.white
-                          : AppPalette.grey600,
+                          ? context.pal.white
+                          : context.pal.grey600,
                       height: 1.4,
                     ),
                   ),
@@ -718,7 +718,7 @@ class _ShelfLifeRow extends StatelessWidget {
           style: Theme.of(context)
               .textTheme
               .bodySmall
-              ?.copyWith(color: AppPalette.grey400),
+              ?.copyWith(color: context.pal.grey400),
         ),
       ],
     );
@@ -735,9 +735,9 @@ class _Card extends StatelessWidget {
         width: double.infinity,
         padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
-          color: AppPalette.white,
+          color: context.pal.white,
           borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: AppPalette.grey200),
+          border: Border.all(color: context.pal.grey200),
         ),
         child: child,
       );

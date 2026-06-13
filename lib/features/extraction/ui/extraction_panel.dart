@@ -1,12 +1,13 @@
 import 'dart:math';
 
+import 'package:resolve_theme/resolve_theme.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../../../core/config_options.dart';
 import '../../../core/di/providers.dart';
-import '../../../core/palette.dart';
 import '../../../core/spacing.dart';
 import 'extraction_review_panel.dart';
 
@@ -41,29 +42,26 @@ class ExtractionJob {
     required this.createdAt,
   });
 
-  factory ExtractionJob.fromJson(Map<String, dynamic> j) => ExtractionJob(
-        id: j['id'] as String,
-        examSlug: j['exam_slug'] as String? ?? 'upsc_cse',
-        year: (j['year'] as num).toInt(),
-        paper: j['paper'] as String? ?? 'GS Paper I',
-        paperSlug: j['paper_slug'] as String? ?? 'gs1',
-        paperSet: j['paper_set'] as String? ?? 'A',
-        pdfName: j['pdf_name'] as String?,
-        status: j['status'] as String? ?? 'pending',
-        progress:
-            (j['progress'] as Map?)?.cast<String, dynamic>() ?? const {},
-        report: (j['report'] as Map?)?.cast<String, dynamic>(),
-        error: j['error'] as String?,
-        createdAt: DateTime.parse(j['created_at'] as String),
-      );
+  factory ExtractionJob.fromJson(Map<String, dynamic> j) {
+    final p = (j['params'] as Map?)?.cast<String, dynamic>() ?? const {};
+    return ExtractionJob(
+      id: j['id'] as String,
+      examSlug: p['exam_slug'] as String? ?? 'upsc_cse',
+      year: (p['year'] as num?)?.toInt() ?? 0,
+      paper: p['paper'] as String? ?? '',
+      paperSlug: p['paper_slug'] as String? ?? '',
+      paperSet: p['paper_set'] as String? ?? 'A',
+      pdfName: p['pdf_name'] as String?,
+      status: j['status'] as String? ?? 'pending',
+      progress:
+          (j['progress'] as Map?)?.cast<String, dynamic>() ?? const {},
+      report: (j['report'] as Map?)?.cast<String, dynamic>(),
+      error: j['error'] as String?,
+      createdAt: DateTime.parse(j['created_at'] as String),
+    );
+  }
 
-  String get examLabel => switch (examSlug) {
-        'upsc_cse'  => 'UPSC CSE',
-        'ssc_cgl'   => 'SSC CGL',
-        'ibps_po'   => 'IBPS PO',
-        'state_psc' => 'State PSC',
-        _           => examSlug.toUpperCase(),
-      };
+  String get examLabel => examSlug.replaceAll('_', ' ').toUpperCase();
 }
 
 // ── Provider ──────────────────────────────────────────────────────────────────
@@ -72,12 +70,80 @@ final extractionJobsProvider =
     StreamProvider.autoDispose<List<ExtractionJob>>((ref) {
   return ref
       .watch(supabaseClientProvider)
-      .from('extraction_jobs')
+      .from('jobs')
       .stream(primaryKey: ['id'])
+      .eq('job_type', 'extraction')
       .order('created_at', ascending: false)
       .limit(50)
       .map((rows) =>
           rows.map((e) => ExtractionJob.fromJson(e)).toList());
+});
+
+// Shared slug→short_name map used for display in cards, headers, review panel.
+// Falls back to selecting just name if short_name column doesn't exist yet.
+final examNamesProvider = FutureProvider<Map<String, String>>((ref) async {
+  final sb = ref.read(supabaseClientProvider);
+  try {
+    final rows = await sb
+        .from('exams')
+        .select('slug, short_name, name') as List<dynamic>;
+    return {
+      for (final r in rows)
+        r['slug'] as String:
+            (r['short_name'] as String?) ?? (r['name'] as String)
+    };
+  } catch (_) {
+    final rows =
+        await sb.from('exams').select('slug, name') as List<dynamic>;
+    return {for (final r in rows) r['slug'] as String: r['name'] as String};
+  }
+});
+
+final _examsListProvider =
+    FutureProvider.autoDispose<List<({String slug, String name})>>((ref) async {
+  final sb = ref.read(supabaseClientProvider);
+  try {
+    final rows = await sb
+        .from('exams')
+        .select('slug, short_name, name')
+        .eq('status', 'active')
+        .order('short_name') as List<dynamic>;
+    return rows
+        .map((r) => (
+              slug: r['slug'] as String,
+              name: (r['short_name'] as String?) ?? (r['name'] as String),
+            ))
+        .toList();
+  } catch (_) {
+    final rows = await sb
+        .from('exams')
+        .select('slug, name')
+        .eq('status', 'active')
+        .order('name') as List<dynamic>;
+    return rows
+        .map((r) => (slug: r['slug'] as String, name: r['name'] as String))
+        .toList();
+  }
+});
+
+final _papersListProvider =
+    FutureProvider.autoDispose<List<({String paper, String paperSlug})>>((ref) async {
+  final rows = await ref
+      .read(supabaseClientProvider)
+      .from('jobs')
+      .select('params')
+      .eq('job_type', 'extraction') as List<dynamic>;
+  final seen = <String>{};
+  final result = <({String paper, String paperSlug})>[];
+  for (final r in rows) {
+    final p = (r['params'] as Map?)?.cast<String, dynamic>() ?? {};
+    final slug = p['paper_slug'] as String? ?? '';
+    final paper = p['paper'] as String? ?? '';
+    if (slug.isNotEmpty && seen.add(slug)) {
+      result.add((paper: paper, paperSlug: slug));
+    }
+  }
+  return result;
 });
 
 // ── Tab filter ────────────────────────────────────────────────────────────────
@@ -163,15 +229,15 @@ class _ExtractionPanelState extends ConsumerState<ExtractionPanel> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(Icons.document_scanner_outlined,
-                size: 48, color: AppPalette.grey300),
+            Icon(Icons.document_scanner_outlined,
+                size: 48, color: context.pal.grey300),
             const SizedBox(height: 12),
             Text(
               'Select a job to review',
               style: Theme.of(context)
                   .textTheme
                   .bodyMedium
-                  ?.copyWith(color: AppPalette.grey400),
+                  ?.copyWith(color: context.pal.grey400),
             ),
           ],
         ),
@@ -188,7 +254,7 @@ class _ExtractionPanelState extends ConsumerState<ExtractionPanel> {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      backgroundColor: AppPalette.white,
+      backgroundColor: context.pal.white,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
       ),
@@ -200,7 +266,7 @@ class _ExtractionPanelState extends ConsumerState<ExtractionPanel> {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      backgroundColor: AppPalette.white,
+      backgroundColor: context.pal.white,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
       ),
@@ -253,11 +319,11 @@ class _JobListPane extends ConsumerWidget {
         SafeArea(
           top: false,
           child: Container(
-            color: AppPalette.white,
+            color: context.pal.white,
             padding: const EdgeInsets.fromLTRB(12, 10, 12, 14),
             child: FilledButton.icon(
               style: FilledButton.styleFrom(
-                backgroundColor: AppPalette.indigo,
+                backgroundColor: context.pal.indigo,
                 minimumSize: const Size(double.infinity, 44),
                 shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(10)),
@@ -283,7 +349,7 @@ class _TabStrip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      color: AppPalette.white,
+      color: context.pal.white,
       child: Column(
         children: [
           Row(
@@ -298,7 +364,7 @@ class _TabStrip extends StatelessWidget {
                       border: Border(
                         bottom: BorderSide(
                           color: sel
-                              ? AppPalette.indigo
+                              ? context.pal.indigo
                               : Colors.transparent,
                           width: 2,
                         ),
@@ -313,8 +379,8 @@ class _TabStrip extends StatelessWidget {
                             ? FontWeight.w600
                             : FontWeight.w400,
                         color: sel
-                            ? AppPalette.indigo
-                            : AppPalette.grey600,
+                            ? context.pal.indigo
+                            : context.pal.grey600,
                       ),
                     ),
                   ),
@@ -322,7 +388,7 @@ class _TabStrip extends StatelessWidget {
               );
             }).toList(),
           ),
-          const Divider(height: 1, color: AppPalette.grey200),
+          Divider(height: 1, color: context.pal.grey200),
         ],
       ),
     );
@@ -353,7 +419,7 @@ class _JobListBody extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(10, 10, 10, 8),
       children: [
         if (active.isNotEmpty) ...[
-          _sectionLabel(active.length),
+          _sectionLabel(context, active.length),
           ...active.map((j) => _JobCard(
                 job: j,
                 isSelected: j.id == selected?.id,
@@ -361,7 +427,7 @@ class _JobListBody extends StatelessWidget {
               )),
         ],
         if (recent.isNotEmpty) ...[
-          _recentLabel(),
+          _recentLabel(context),
           ...recent.map((j) => _JobCard(
                 job: j,
                 isSelected: j.id == selected?.id,
@@ -372,46 +438,46 @@ class _JobListBody extends StatelessWidget {
     );
   }
 
-  Widget _sectionLabel(int count) => Padding(
+  Widget _sectionLabel(BuildContext context, int count) => Padding(
         padding: const EdgeInsets.fromLTRB(4, 4, 4, 6),
         child: Row(children: [
-          const Text('ACTIVE',
+          Text('ACTIVE',
               style: TextStyle(
                   fontSize: 10,
                   fontWeight: FontWeight.w700,
                   letterSpacing: 0.8,
-                  color: AppPalette.grey400)),
+                  color: context.pal.grey400)),
           const SizedBox(width: 6),
           Container(
             padding:
                 const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
             decoration: BoxDecoration(
-              color: AppPalette.indigoLight,
+              color: context.pal.indigoLight,
               borderRadius: BorderRadius.circular(10),
             ),
             child: Text('$count',
-                style: const TextStyle(
+                style: TextStyle(
                     fontSize: 10,
                     fontWeight: FontWeight.w700,
-                    color: AppPalette.indigo)),
+                    color: context.pal.indigo)),
           ),
         ]),
       );
 
-  Widget _recentLabel() => const Padding(
+  Widget _recentLabel(BuildContext context) => Padding(
         padding: EdgeInsets.fromLTRB(4, 10, 4, 6),
         child: Text('RECENT',
             style: TextStyle(
                 fontSize: 10,
                 fontWeight: FontWeight.w700,
                 letterSpacing: 0.8,
-                color: AppPalette.grey400)),
+                color: context.pal.grey400)),
       );
 }
 
 // ── Job card ──────────────────────────────────────────────────────────────────
 
-class _JobCard extends StatelessWidget {
+class _JobCard extends ConsumerWidget {
   final ExtractionJob job;
   final bool isSelected;
   final VoidCallback onTap;
@@ -419,8 +485,9 @@ class _JobCard extends StatelessWidget {
       {required this.job, required this.isSelected, required this.onTap});
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
+    final examNames = ref.watch(examNamesProvider).valueOrNull ?? const {};
     final total =
         (job.progress['pages_total'] as num?)?.toInt() ?? 0;
     final done =
@@ -436,11 +503,11 @@ class _JobCard extends StatelessWidget {
         margin: const EdgeInsets.only(bottom: 8),
         padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
-          color: isSelected ? AppPalette.indigoLight : AppPalette.white,
+          color: isSelected ? context.pal.indigoLight : context.pal.white,
           borderRadius: BorderRadius.circular(10),
           border: Border.all(
             color:
-                isSelected ? AppPalette.indigo : AppPalette.grey200,
+                isSelected ? context.pal.indigo : context.pal.grey200,
             width: isSelected ? 1.5 : 1,
           ),
         ),
@@ -459,15 +526,35 @@ class _JobCard extends StatelessWidget {
                     ),
                     const SizedBox(height: 2),
                     Text(
-                      job.examLabel,
+                      examNames[job.examSlug] ?? job.examLabel,
                       style: theme.textTheme.bodySmall?.copyWith(
-                          color: AppPalette.grey400, fontSize: 11),
+                          color: context.pal.grey400, fontSize: 11),
                     ),
                   ],
                 ),
               ),
               const SizedBox(width: 8),
               _StatusChip(status: job.status),
+              PopupMenuButton<String>(
+                icon: Icon(Icons.more_vert,
+                    size: 18, color: context.pal.grey400),
+                padding: EdgeInsets.zero,
+                tooltip: 'Job actions',
+                onSelected: (v) {
+                  if (v == 'delete') _confirmDelete(context, ref);
+                },
+                itemBuilder: (_) => [
+                  PopupMenuItem<String>(
+                    value: 'delete',
+                    child: Row(children: [
+                      Icon(Icons.delete_outline,
+                          size: 18, color: context.pal.red),
+                      const SizedBox(width: 8),
+                      const Text('Delete job'),
+                    ]),
+                  ),
+                ],
+              ),
             ]),
             if (job.pdfName != null) ...[
               const SizedBox(height: 4),
@@ -476,7 +563,7 @@ class _JobCard extends StatelessWidget {
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: theme.textTheme.bodySmall?.copyWith(
-                    color: AppPalette.grey400, fontSize: 11),
+                    color: context.pal.grey400, fontSize: 11),
               ),
             ],
             const SizedBox(height: 10),
@@ -486,15 +573,15 @@ class _JobCard extends StatelessWidget {
                 child: LinearProgressIndicator(
                   value: done / total,
                   minHeight: 4,
-                  backgroundColor: AppPalette.grey100,
-                  color: AppPalette.indigo,
+                  backgroundColor: context.pal.grey100,
+                  color: context.pal.indigo,
                 ),
               ),
               const SizedBox(height: 6),
               Text(
                 'Page $done / $total · $qs questions',
                 style: theme.textTheme.bodySmall
-                    ?.copyWith(color: AppPalette.grey600),
+                    ?.copyWith(color: context.pal.grey600),
               ),
             ] else if (active) ...[
               Row(children: [
@@ -506,24 +593,63 @@ class _JobCard extends StatelessWidget {
                 const SizedBox(width: 8),
                 Text('Queued — waiting for worker…',
                     style: theme.textTheme.bodySmall
-                        ?.copyWith(color: AppPalette.grey600)),
+                        ?.copyWith(color: context.pal.grey600)),
               ]),
             ] else
-              _coverageLine(theme),
+              _coverageLine(context, theme),
           ],
         ),
       ),
     );
   }
 
-  Widget _coverageLine(ThemeData theme) {
+  Future<void> _confirmDelete(BuildContext context, WidgetRef ref) async {
+    final messenger = ScaffoldMessenger.of(context);
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (d) => AlertDialog(
+        title: const Text('Delete job?'),
+        content: Text(
+          'Remove "${job.year} · ${job.paper} · Set ${job.paperSet}" from the '
+          'list? This deletes the extraction job. Drafts already in review are '
+          'not affected.',
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(d, false),
+              child: const Text('Cancel')),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: context.pal.red),
+            onPressed: () => Navigator.pop(d, true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    try {
+      // The .stream() provider removes the card automatically. Requires the
+      // jobs_editor_delete RLS policy (question-bank migration 012).
+      await ref
+          .read(supabaseClientProvider)
+          .from('jobs')
+          .delete()
+          .eq('id', job.id);
+      messenger.showSnackBar(const SnackBar(content: Text('Job deleted')));
+    } catch (e) {
+      messenger.showSnackBar(
+          SnackBar(content: Text('Delete failed: $e')));
+    }
+  }
+
+  Widget _coverageLine(BuildContext context, ThemeData theme) {
     final cov =
         (job.report?['coverage'] as Map?)?.cast<String, dynamic>();
     if (cov == null) {
       if (job.status == 'failed') {
         return Text(job.error ?? 'Failed',
             style: theme.textTheme.bodySmall
-                ?.copyWith(color: AppPalette.red));
+                ?.copyWith(color: context.pal.red));
       }
       return const SizedBox.shrink();
     }
@@ -538,7 +664,7 @@ class _JobCard extends StatelessWidget {
       '${missing > 0 ? ' · $missing missing' : ' · complete'}',
       style: theme.textTheme.bodySmall?.copyWith(
         color: missing > 0
-            ? AppPalette.amber
+            ? context.pal.amber
             : const Color(0xFF16A34A),
         fontWeight: FontWeight.w600,
       ),
@@ -553,11 +679,11 @@ class _StatusChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final (label, color, bg) = switch (status) {
-      'pending'      => ('Queued',  AppPalette.grey600,      AppPalette.grey100),
-      'running'      => ('Running', AppPalette.indigo,       AppPalette.indigoLight),
-      'needs_review' => ('Review',  AppPalette.amber,        AppPalette.amberLight),
+      'pending'      => ('Queued',  context.pal.grey600,      context.pal.grey100),
+      'running'      => ('Running', context.pal.indigo,       context.pal.indigoLight),
+      'needs_review' => ('Review',  context.pal.amber,        context.pal.amberLight),
       'completed'    => ('Done',    const Color(0xFF16A34A), const Color(0xFFDCFCE7)),
-      _              => ('Failed',  AppPalette.red,          const Color(0xFFFEE2E2)),
+      _              => ('Failed',  context.pal.red,          const Color(0xFFFEE2E2)),
     };
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
@@ -590,30 +716,13 @@ class _EmptyList extends StatelessWidget {
           style: Theme.of(context)
               .textTheme
               .bodyMedium
-              ?.copyWith(color: AppPalette.grey400)),
+              ?.copyWith(color: context.pal.grey400)),
     );
   }
 }
 
 // ── Paper / exam constants ────────────────────────────────────────────────────
 
-const _kPapers = <String, (String, String)>{
-  'GS I':   ('GS Paper I',   'gs1'),
-  'GS II':  ('GS Paper II',  'gs2'),
-  'GS III': ('GS Paper III', 'gs3'),
-  'GS IV':  ('GS Paper IV',  'gs4'),
-  'CSAT':   ('CSAT',         'csat'),
-  'Essay':  ('Essay',        'essay'),
-};
-
-const _kExams = <String, String>{
-  'UPSC CSE':  'upsc_cse',
-  'SSC CGL':   'ssc_cgl',
-  'IBPS PO':   'ibps_po',
-  'State PSC': 'state_psc',
-};
-
-const _kSets = ['A', 'B', 'C', 'D'];
 
 // ── Layout presets ────────────────────────────────────────────────────────────
 // A preset is the human-facing choice; it maps to the worker contract's `layout`
@@ -668,16 +777,17 @@ class _NewJobSheet extends ConsumerStatefulWidget {
 }
 
 class _NewJobSheetState extends ConsumerState<_NewJobSheet> {
-  String _examKey = 'UPSC CSE';
-  String _paperKey = 'GS I';
+  String? _examSlug;
+  String? _paperSlug;
+  String? _paper;
   String _set = 'A';
   _LayoutPreset _preset = _LayoutPreset.upscPagePair;
   final _year = TextEditingController(text: '');
   final _expected = TextEditingController(text: '100');
-  final _startPage = TextEditingController(text: '3');
-  final _pageStep = TextEditingController(text: '2');
-  final _hindiOffset = TextEditingController(text: '-1');
-  bool _advExpanded = false;
+  final _paperCtrl = TextEditingController();
+  int _startPage = 3;
+  int _pageStep = 2;
+  int _hindiOffset = -1;
   PlatformFile? _pdf;
   bool _isImage = false;
   bool _busy = false;
@@ -685,39 +795,31 @@ class _NewJobSheetState extends ConsumerState<_NewJobSheet> {
 
   static const _imageExts = {'png', 'jpg', 'jpeg'};
 
-  // Presets offered for the current file type. A single image can't have a
-  // separate Hindi page, so page_pair is hidden for images.
   List<_LayoutPreset> get _availablePresets => _isImage
       ? const [_LayoutPreset.samePage, _LayoutPreset.englishOnly]
       : _LayoutPreset.values;
 
-  // Push the selected preset's page knobs into the advanced fields. Images are
-  // always a single page, so they pin start/step to 1 regardless of preset.
   void _applyPreset(_LayoutPreset p) {
-    _preset = p;
     final (start, step, offset) = p.pdfDefaults;
-    if (_isImage) {
-      _startPage.text = '1';
-      _pageStep.text = '1';
-      _hindiOffset.text = '0';
-    } else {
-      _startPage.text = '$start';
-      _pageStep.text = '$step';
-      _hindiOffset.text = '$offset';
-    }
+    setState(() {
+      _preset = p;
+      _startPage = _isImage ? 1 : start;
+      _pageStep  = _isImage ? 1 : step;
+      _hindiOffset = _isImage ? 0 : offset;
+    });
   }
+
+  String _slugify(String s) => s
+      .toLowerCase()
+      .trim()
+      .replaceAll(RegExp(r'[^a-z0-9]+'), '_')
+      .replaceAll(RegExp(r'^_+|_+$'), '');
 
   @override
   void dispose() {
-    for (final c in [
-      _year,
-      _expected,
-      _startPage,
-      _pageStep,
-      _hindiOffset
-    ]) {
-      c.dispose();
-    }
+    _year.dispose();
+    _expected.dispose();
+    _paperCtrl.dispose();
     super.dispose();
   }
 
@@ -735,14 +837,12 @@ class _NewJobSheetState extends ConsumerState<_NewJobSheet> {
         _pdf = file;
         _isImage = isImg;
         if (isImg) {
-          // An image is one page with an unknown question count. Default to the
-          // same-page bilingual scan; user can switch to English-only.
           _expected.text = '0';
-          if (!_availablePresets.contains(_preset)) {
-            _applyPreset(_LayoutPreset.samePage);
-          } else {
-            _applyPreset(_preset);
-          }
+          final p = _availablePresets.contains(_preset)
+              ? _preset
+              : _LayoutPreset.samePage;
+          _preset = p;
+          _startPage = 1; _pageStep = 1; _hindiOffset = 0;
         } else {
           if (_expected.text == '0') _expected.text = '100';
           _applyPreset(_preset);
@@ -761,16 +861,21 @@ class _NewJobSheetState extends ConsumerState<_NewJobSheet> {
       setState(() => _err = 'Enter a valid year.');
       return;
     }
-    setState(() {
-      _busy = true;
-      _err = null;
-    });
+    if (_examSlug == null) {
+      setState(() => _err = 'Select an exam.');
+      return;
+    }
+    final paper = (_paper?.isNotEmpty == true) ? _paper! : _paperCtrl.text.trim();
+    if (paper.isEmpty) {
+      setState(() => _err = 'Enter a paper name.');
+      return;
+    }
+    final paperSlug = _paperSlug ?? _slugify(paper);
+    setState(() { _busy = true; _err = null; });
     try {
       final sb = ref.read(supabaseClientProvider);
       final uid = sb.auth.currentUser?.id;
       final rand = Random().nextInt(1 << 32).toRadixString(16);
-      final (paperName, paperSlug) = _kPapers[_paperKey]!;
-      final examSlug = _kExams[_examKey]!;
       final path = '$year/${paperSlug}_${rand}_${_pdf!.name}';
       final contentType = _isImage
           ? 'image/${_pdf!.extension?.toLowerCase()}'
@@ -780,37 +885,50 @@ class _NewJobSheetState extends ConsumerState<_NewJobSheet> {
             _pdf!.bytes!,
             fileOptions: FileOptions(contentType: contentType),
           );
-      await sb.from('extraction_jobs').insert({
-        'created_by':     uid,
-        'exam_slug':      examSlug,
-        'year':           year,
-        'paper':          paperName,
-        'paper_slug':     paperSlug,
-        'paper_set':      _set,
-        'layout':         _preset.dbValue,
-        'pdf_path':       path,
-        'pdf_name':       _pdf!.name,
-        'want_hindi':     _preset.wantHindi,
-        'expected_count': int.tryParse(_expected.text.trim()) ?? 0,
-        'start_page':     int.tryParse(_startPage.text.trim()) ?? 1,
-        'page_step':      int.tryParse(_pageStep.text.trim()) ?? 1,
-        'hindi_offset':   int.tryParse(_hindiOffset.text.trim()) ?? -1,
+      await sb.from('jobs').insert({
+        'job_type':     'extraction',
+        'triggered_by': 'admin',
+        'created_by':   uid,
+        'params': {
+          'exam_slug':      _examSlug,
+          'year':           year,
+          'paper':          paper,
+          'paper_slug':     paperSlug,
+          'paper_set':      _set,
+          'layout':         _preset.dbValue,
+          'pdf_path':       path,
+          'pdf_name':       _pdf!.name,
+          'want_hindi':     _preset.wantHindi,
+          'expected_count': int.tryParse(_expected.text.trim()) ?? 0,
+          'start_page':     _startPage,
+          'page_step':      _pageStep,
+          'hindi_offset':   _hindiOffset,
+        },
       });
-      if (mounted) Navigator.pop(context);
+      if (mounted) {
+        Navigator.pop(context);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Job queued — waiting for worker')),
+        );
+      }
     } catch (e) {
-      setState(() {
-        _busy = false;
-        _err = '$e';
-      });
+      setState(() { _busy = false; _err = '$e'; });
     }
   }
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final examsAsync = ref.watch(_examsListProvider);
+    final papersAsync = ref.watch(_papersListProvider);
+    final sets = ref.watch(configOptionsProvider('paper_set')).valueOrNull ??
+        defaultConfigOptions['paper_set']!;
+
     return Padding(
       padding: EdgeInsets.only(
-        bottom: MediaQuery.of(context).viewInsets.bottom + 24,
+        bottom: MediaQuery.of(context).viewInsets.bottom +
+            MediaQuery.of(context).padding.bottom +
+            24,
         left: AppSpacing.pagePadding,
         right: AppSpacing.pagePadding,
         top: 20,
@@ -826,7 +944,7 @@ class _NewJobSheetState extends ConsumerState<_NewJobSheet> {
                 height: 4,
                 margin: const EdgeInsets.only(bottom: 16),
                 decoration: BoxDecoration(
-                  color: AppPalette.grey200,
+                  color: context.pal.grey200,
                   borderRadius: BorderRadius.circular(2),
                 ),
               ),
@@ -843,23 +961,17 @@ class _NewJobSheetState extends ConsumerState<_NewJobSheet> {
                 width: double.infinity,
                 padding: const EdgeInsets.all(14),
                 decoration: BoxDecoration(
-                  color: AppPalette.grey100,
+                  color: context.pal.grey100,
                   borderRadius: BorderRadius.circular(10),
                   border: Border.all(
-                    color: _pdf == null
-                        ? AppPalette.grey200
-                        : AppPalette.indigo,
+                    color: _pdf == null ? context.pal.grey200 : context.pal.indigo,
                     width: _pdf == null ? 1 : 1.5,
                   ),
                 ),
                 child: Row(children: [
                   Icon(
-                    _pdf == null
-                        ? Icons.upload_file_outlined
-                        : Icons.check_circle,
-                    color: _pdf == null
-                        ? AppPalette.grey400
-                        : AppPalette.indigo,
+                    _pdf == null ? Icons.upload_file_outlined : Icons.check_circle,
+                    color: _pdf == null ? context.pal.grey400 : context.pal.indigo,
                     size: 22,
                   ),
                   const SizedBox(width: 10),
@@ -868,8 +980,7 @@ class _NewJobSheetState extends ConsumerState<_NewJobSheet> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          _pdf?.name ??
-                              'Choose PDF or image (PNG / JPG)',
+                          _pdf?.name ?? 'Choose PDF or image (PNG / JPG)',
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: theme.textTheme.bodyMedium,
@@ -877,7 +988,7 @@ class _NewJobSheetState extends ConsumerState<_NewJobSheet> {
                         if (_pdf == null)
                           Text('PDF · PNG · JPG — max 50 MB',
                               style: theme.textTheme.bodySmall
-                                  ?.copyWith(color: AppPalette.grey400)),
+                                  ?.copyWith(color: context.pal.grey400)),
                       ],
                     ),
                   ),
@@ -886,36 +997,73 @@ class _NewJobSheetState extends ConsumerState<_NewJobSheet> {
             ),
             const SizedBox(height: 16),
 
-            // Exam chips
-            _sectionLabel('Exam'),
-            const SizedBox(height: 8),
-            Wrap(
-              spacing: 6,
-              runSpacing: 6,
-              children: _kExams.keys
-                  .map((k) => _Chip(
-                        label: k,
-                        selected: _examKey == k,
-                        onTap: () => setState(() => _examKey = k),
-                      ))
-                  .toList(),
+            // Exam dropdown (loaded from DB)
+            examsAsync.when(
+              loading: () => const SizedBox(
+                height: 48,
+                child: LinearProgressIndicator(minHeight: 2),
+              ),
+              error: (e, _) => Text('Could not load exams: $e',
+                  style: TextStyle(color: context.pal.red, fontSize: 12)),
+              data: (exams) => DropdownButtonFormField<String>(
+                initialValue: _examSlug,
+                decoration: InputDecoration(
+                  labelText: 'Exam',
+                  filled: true,
+                  fillColor: context.pal.grey100,
+                  contentPadding:
+                      const EdgeInsets.symmetric(vertical: 10, horizontal: 14),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(10),
+                    borderSide: BorderSide.none,
+                  ),
+                ),
+                hint: const Text('Select exam'),
+                isExpanded: true,
+                items: exams
+                    .map((e) => DropdownMenuItem(
+                          value: e.slug,
+                          child: Text(e.name, overflow: TextOverflow.ellipsis),
+                        ))
+                    .toList(),
+                onChanged: (v) => setState(() => _examSlug = v),
+              ),
             ),
             const SizedBox(height: 14),
 
-            // Paper chips
+            // Paper — suggestion chips from previous jobs + free-text entry
             _sectionLabel('Paper'),
             const SizedBox(height: 8),
-            Wrap(
-              spacing: 6,
-              runSpacing: 6,
-              children: _kPapers.keys
-                  .map((k) => _Chip(
-                        label: k,
-                        selected: _paperKey == k,
-                        onTap: () => setState(() => _paperKey = k),
-                      ))
-                  .toList(),
+            papersAsync.maybeWhen(
+              data: (papers) {
+                if (papers.isEmpty) return const SizedBox.shrink();
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: Wrap(
+                    spacing: 6,
+                    runSpacing: 6,
+                    children: papers
+                        .map((p) => _Chip(
+                              label: p.paper,
+                              selected: _paperSlug == p.paperSlug,
+                              onTap: () => setState(() {
+                                _paper = p.paper;
+                                _paperSlug = p.paperSlug;
+                                _paperCtrl.text = p.paper;
+                              }),
+                            ))
+                        .toList(),
+                  ),
+                );
+              },
+              orElse: () => const SizedBox.shrink(),
             ),
+            _field('Paper name', _paperCtrl,
+                hint: 'e.g. GS Paper I',
+                onChanged: (v) => setState(() {
+                      _paper = v;
+                      _paperSlug = null;
+                    })),
             const SizedBox(height: 14),
 
             // Year + Set
@@ -923,8 +1071,7 @@ class _NewJobSheetState extends ConsumerState<_NewJobSheet> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Expanded(
-                  child: _field('Year', _year,
-                      hint: 'e.g. 2024', number: true),
+                  child: _field('Year', _year, hint: 'e.g. 2024', number: true),
                 ),
                 const SizedBox(width: 12),
                 Expanded(
@@ -935,12 +1082,11 @@ class _NewJobSheetState extends ConsumerState<_NewJobSheet> {
                       const SizedBox(height: 6),
                       Wrap(
                         spacing: 6,
-                        children: _kSets
+                        children: sets
                             .map((s) => _Chip(
                                   label: s,
                                   selected: _set == s,
-                                  onTap: () =>
-                                      setState(() => _set = s),
+                                  onTap: () => setState(() => _set = s),
                                 ))
                             .toList(),
                       ),
@@ -957,94 +1103,27 @@ class _NewJobSheetState extends ConsumerState<_NewJobSheet> {
             ..._availablePresets.map((p) => _PresetCard(
                   preset: p,
                   selected: _preset == p,
-                  onTap: () => setState(() => _applyPreset(p)),
+                  onTap: () => _applyPreset(p),
                 )),
             const SizedBox(height: 14),
 
-            // Expected Qs (0 = extract whatever is present, e.g. a single image)
             _field('Expected questions', _expected, number: true),
-            const SizedBox(height: 14),
-
-            // Advanced section — raw page knobs, pre-filled by the preset. Hidden
-            // for images (always a single page). Rarely needed for PDFs.
-            if (!_isImage) ...[
-              GestureDetector(
-                onTap: () =>
-                    setState(() => _advExpanded = !_advExpanded),
-                child: Container(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 12, vertical: 10),
-                  decoration: BoxDecoration(
-                    color: AppPalette.grey100,
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Row(children: [
-                    const Icon(Icons.tune,
-                        size: 16, color: AppPalette.grey600),
-                    const SizedBox(width: 8),
-                    const Expanded(
-                      child: Text('Advanced page layout',
-                          style: TextStyle(
-                              fontSize: 13,
-                              color: AppPalette.grey600)),
-                    ),
-                    Icon(
-                      _advExpanded
-                          ? Icons.keyboard_arrow_up
-                          : Icons.keyboard_arrow_down,
-                      size: 18,
-                      color: AppPalette.grey400,
-                    ),
-                  ]),
-                ),
-              ),
-              if (_advExpanded) ...[
-                const SizedBox(height: 10),
-                Row(children: [
-                  Expanded(
-                      child: _field('Start page', _startPage,
-                          number: true)),
-                  const SizedBox(width: 10),
-                  Expanded(
-                      child: _field('Page step', _pageStep,
-                          number: true)),
-                  if (_preset == _LayoutPreset.upscPagePair) ...[
-                    const SizedBox(width: 10),
-                    Expanded(
-                        child: _field('Hindi offset', _hindiOffset,
-                            number: true)),
-                  ],
-                ]),
-                const SizedBox(height: 6),
-                Text(
-                  _preset == _LayoutPreset.upscPagePair
-                      ? 'UPSC: English on odd pages (step 2 from page 3), Hindi twin at offset −1.'
-                      : 'Set the first content page and the gap between pages to scan.',
-                  style: theme.textTheme.bodySmall
-                      ?.copyWith(color: AppPalette.grey400, fontSize: 11),
-                ),
-              ],
-            ],
 
             if (_err != null) ...[
               const SizedBox(height: 12),
               Text(_err!,
-                  style: const TextStyle(
-                      color: AppPalette.red, fontSize: 12)),
+                  style: TextStyle(color: context.pal.red, fontSize: 12)),
             ],
             const SizedBox(height: 20),
             Row(children: [
               const Spacer(),
               TextButton(
-                onPressed: _busy
-                    ? null
-                    : () => Navigator.pop(context),
+                onPressed: _busy ? null : () => Navigator.pop(context),
                 child: const Text('Cancel'),
               ),
               const SizedBox(width: 8),
               FilledButton.icon(
-                style: FilledButton.styleFrom(
-                    backgroundColor: AppPalette.indigo),
+                style: FilledButton.styleFrom(backgroundColor: context.pal.indigo),
                 icon: _busy
                     ? const SizedBox(
                         width: 16,
@@ -1064,11 +1143,11 @@ class _NewJobSheetState extends ConsumerState<_NewJobSheet> {
 
   Widget _sectionLabel(String text) => Text(
         text.toUpperCase(),
-        style: const TextStyle(
+        style: TextStyle(
           fontSize: 10,
           fontWeight: FontWeight.w700,
           letterSpacing: 0.8,
-          color: AppPalette.grey400,
+          color: context.pal.grey400,
         ),
       );
 
@@ -1077,18 +1156,19 @@ class _NewJobSheetState extends ConsumerState<_NewJobSheet> {
     TextEditingController c, {
     String? hint,
     bool number = false,
+    ValueChanged<String>? onChanged,
   }) =>
       TextField(
         controller: c,
-        keyboardType:
-            number ? TextInputType.number : TextInputType.text,
+        keyboardType: number ? TextInputType.number : TextInputType.text,
+        onChanged: onChanged,
         decoration: InputDecoration(
           labelText: label,
           hintText: hint,
           filled: true,
-          fillColor: AppPalette.grey100,
-          contentPadding: const EdgeInsets.symmetric(
-              vertical: 10, horizontal: 14),
+          fillColor: context.pal.grey100,
+          contentPadding:
+              const EdgeInsets.symmetric(vertical: 10, horizontal: 14),
           border: OutlineInputBorder(
             borderRadius: BorderRadius.circular(10),
             borderSide: BorderSide.none,
@@ -1116,10 +1196,10 @@ class _Chip extends StatelessWidget {
         padding:
             const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
         decoration: BoxDecoration(
-          color: selected ? AppPalette.indigoLight : Colors.transparent,
+          color: selected ? context.pal.indigoLight : Colors.transparent,
           borderRadius: BorderRadius.circular(20),
           border: Border.all(
-            color: selected ? AppPalette.indigo : AppPalette.grey200,
+            color: selected ? context.pal.indigo : context.pal.grey200,
             width: selected ? 1.5 : 1,
           ),
         ),
@@ -1130,7 +1210,7 @@ class _Chip extends StatelessWidget {
             fontWeight:
                 selected ? FontWeight.w600 : FontWeight.w400,
             color:
-                selected ? AppPalette.indigo : AppPalette.grey700,
+                selected ? context.pal.indigo : context.pal.grey700,
           ),
         ),
       ),
@@ -1157,17 +1237,17 @@ class _PresetCard extends StatelessWidget {
         margin: const EdgeInsets.only(bottom: 8),
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
         decoration: BoxDecoration(
-          color: selected ? AppPalette.indigoLight : AppPalette.white,
+          color: selected ? context.pal.indigoLight : context.pal.white,
           borderRadius: BorderRadius.circular(10),
           border: Border.all(
-            color: selected ? AppPalette.indigo : AppPalette.grey200,
+            color: selected ? context.pal.indigo : context.pal.grey200,
             width: selected ? 1.5 : 1,
           ),
         ),
         child: Row(children: [
           Icon(preset.icon,
               size: 20,
-              color: selected ? AppPalette.indigo : AppPalette.grey600),
+              color: selected ? context.pal.indigo : context.pal.grey600),
           const SizedBox(width: 12),
           Expanded(
             child: Column(
@@ -1178,13 +1258,13 @@ class _PresetCard extends StatelessWidget {
                       fontSize: 13,
                       fontWeight: FontWeight.w600,
                       color: selected
-                          ? AppPalette.indigo
-                          : AppPalette.grey900,
+                          ? context.pal.indigo
+                          : context.pal.grey900,
                     )),
                 const SizedBox(height: 1),
                 Text(preset.subtitle,
-                    style: const TextStyle(
-                        fontSize: 11, color: AppPalette.grey600)),
+                    style: TextStyle(
+                        fontSize: 11, color: context.pal.grey600)),
               ],
             ),
           ),
@@ -1193,7 +1273,7 @@ class _PresetCard extends StatelessWidget {
                 ? Icons.radio_button_checked
                 : Icons.radio_button_unchecked,
             size: 18,
-            color: selected ? AppPalette.indigo : AppPalette.grey300,
+            color: selected ? context.pal.indigo : context.pal.grey300,
           ),
         ]),
       ),
@@ -1221,6 +1301,7 @@ class _JobDetailSheet extends ConsumerWidget {
         child: Center(child: CircularProgressIndicator()),
       );
     }
+    final examNames = ref.watch(examNamesProvider).valueOrNull ?? const {};
     final cov =
         (job.report?['coverage'] as Map?)?.cast<String, dynamic>();
     final missing = (cov?['missing'] as List?) ?? const [];
@@ -1231,7 +1312,9 @@ class _JobDetailSheet extends ConsumerWidget {
 
     return Padding(
       padding: EdgeInsets.only(
-        bottom: MediaQuery.of(context).viewInsets.bottom + 24,
+        bottom: MediaQuery.of(context).viewInsets.bottom +
+            MediaQuery.of(context).padding.bottom +
+            24,
         left: AppSpacing.pagePadding,
         right: AppSpacing.pagePadding,
         top: 20,
@@ -1246,7 +1329,7 @@ class _JobDetailSheet extends ConsumerWidget {
               height: 4,
               margin: const EdgeInsets.only(bottom: 16),
               decoration: BoxDecoration(
-                color: AppPalette.grey200,
+                color: context.pal.grey200,
                 borderRadius: BorderRadius.circular(2),
               ),
             ),
@@ -1261,9 +1344,9 @@ class _JobDetailSheet extends ConsumerWidget {
                     style: theme.textTheme.titleMedium
                         ?.copyWith(fontWeight: FontWeight.w700),
                   ),
-                  Text(job.examLabel,
+                  Text(examNames[job.examSlug] ?? job.examLabel,
                       style: theme.textTheme.bodySmall
-                          ?.copyWith(color: AppPalette.grey400)),
+                          ?.copyWith(color: context.pal.grey400)),
                 ],
               ),
             ),
@@ -1272,10 +1355,10 @@ class _JobDetailSheet extends ConsumerWidget {
           const SizedBox(height: 4),
           SelectableText('Job ID: ${job.id}',
               style: theme.textTheme.bodySmall?.copyWith(
-                  color: AppPalette.grey400, fontSize: 11)),
+                  color: context.pal.grey400, fontSize: 11)),
           const SizedBox(height: 16),
           if (cov != null) ...[
-            _statRow(() {
+            _statRow(context, () {
               final found = cov['found'];
               final exp =
                   (cov['expected_count'] as num?)?.toInt() ?? 0;
@@ -1283,25 +1366,25 @@ class _JobDetailSheet extends ConsumerWidget {
                   exp > 0 ? '$found / $exp' : '$found', null);
             }()),
             if (missing.isNotEmpty)
-              _statRow(('Missing qnos', missing.join(', '),
-                  AppPalette.amber)),
+              _statRow(context, ('Missing qnos', missing.join(', '),
+                  context.pal.amber)),
             if (invalid.isNotEmpty)
-              _statRow(('Invalid (quarantined)',
-                  '${invalid.length}', AppPalette.amber)),
+              _statRow(context, ('Invalid (quarantined)',
+                  '${invalid.length}', context.pal.amber)),
             if (failed.isNotEmpty)
-              _statRow(('Failed pages',
+              _statRow(context, ('Failed pages',
                   failed
                       .map((f) => (f as Map)['page'])
                       .join(', '),
-                  AppPalette.red)),
+                  context.pal.red)),
           ] else if (job.status == 'failed') ...[
             Text(job.error ?? 'Failed',
                 style:
-                    const TextStyle(color: AppPalette.red)),
+                    TextStyle(color: context.pal.red)),
           ] else
             Text('Waiting for the worker to report…',
                 style: theme.textTheme.bodyMedium
-                    ?.copyWith(color: AppPalette.grey600)),
+                    ?.copyWith(color: context.pal.grey600)),
           const SizedBox(height: 20),
           if (job.status == 'needs_review' ||
               job.status == 'completed')
@@ -1311,7 +1394,7 @@ class _JobDetailSheet extends ConsumerWidget {
     );
   }
 
-  Widget _statRow((String, String, Color?) t) {
+  Widget _statRow(BuildContext context, (String, String, Color?) t) {
     final (label, value, color) = t;
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4),
@@ -1319,14 +1402,14 @@ class _JobDetailSheet extends ConsumerWidget {
         SizedBox(
           width: 140,
           child: Text(label,
-              style: const TextStyle(
-                  color: AppPalette.grey600, fontSize: 13)),
+              style: TextStyle(
+                  color: context.pal.grey600, fontSize: 13)),
         ),
         Expanded(
           child: Text(value,
               style: TextStyle(
                   fontWeight: FontWeight.w600,
-                  color: color ?? AppPalette.grey900,
+                  color: color ?? context.pal.grey900,
                   fontSize: 13)),
         ),
       ]),

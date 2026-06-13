@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:resolve_theme/resolve_theme.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/di/providers.dart';
 import '../data/feedback_model.dart';
-import '../../../core/palette.dart';
 import '../../../core/spacing.dart';
 
 // ── Providers ─────────────────────────────────────────────────────────────────
@@ -34,7 +34,7 @@ class FeedbackPanel extends ConsumerWidget {
       children: [
         // Header
         Container(
-          color: AppPalette.white,
+          color: context.pal.white,
           padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -47,7 +47,7 @@ class FeedbackPanel extends ConsumerWidget {
                   current: filter,
                   onChanged: (v) =>
                       ref.read(_feedbackFilterProvider.notifier).state = v),
-              const Divider(height: 1, color: AppPalette.grey200),
+              Divider(height: 1, color: context.pal.grey200),
             ],
           ),
         ),
@@ -58,7 +58,7 @@ class FeedbackPanel extends ConsumerWidget {
                 const Center(child: CircularProgressIndicator(strokeWidth: 2)),
             error: (e, _) => Center(child: Text('Error: $e')),
             data: (items) => items.isEmpty
-                ? _emptyState(filter)
+                ? _emptyState(context, filter)
                 : RefreshIndicator(
                     onRefresh: () =>
                         ref.refresh(_allFeedbackProvider.future),
@@ -82,7 +82,7 @@ class FeedbackPanel extends ConsumerWidget {
     );
   }
 
-  Widget _emptyState(String? filter) {
+  Widget _emptyState(BuildContext context, String? filter) {
     final label = switch (filter) {
       'pending' => 'No pending feedback',
       'addressed' => 'No addressed feedback',
@@ -93,11 +93,11 @@ class FeedbackPanel extends ConsumerWidget {
         mainAxisSize: MainAxisSize.min,
         children: [
           Icon(Icons.check_circle_outline,
-              size: 48, color: AppPalette.grey300),
+              size: 48, color: context.pal.grey300),
           const SizedBox(height: 12),
           Text(label,
-              style: const TextStyle(
-                  color: AppPalette.grey400, fontSize: 15)),
+              style: TextStyle(
+                  color: context.pal.grey400, fontSize: 15)),
         ],
       ),
     );
@@ -136,8 +136,8 @@ class FeedbackPanel extends ConsumerWidget {
           ),
           TextButton(
             onPressed: () => Navigator.pop(dialogContext, true),
-            child: const Text('Delete',
-                style: TextStyle(color: AppPalette.red)),
+            child: Text('Delete',
+                style: TextStyle(color: context.pal.red)),
           ),
         ],
       ),
@@ -196,10 +196,10 @@ class _Tab extends StatelessWidget {
         child: Container(
           alignment: Alignment.center,
           decoration: BoxDecoration(
-            color: AppPalette.white,
+            color: context.pal.white,
             border: Border(
               bottom: BorderSide(
-                color: selected ? AppPalette.indigo : Colors.transparent,
+                color: selected ? context.pal.indigo : Colors.transparent,
                 width: 2,
               ),
             ),
@@ -207,7 +207,7 @@ class _Tab extends StatelessWidget {
           child: Text(
             label,
             style: TextStyle(
-              color: selected ? AppPalette.indigo : AppPalette.grey400,
+              color: selected ? context.pal.indigo : context.pal.grey400,
               fontWeight:
                   selected ? FontWeight.w600 : FontWeight.w400,
               fontSize: 13,
@@ -234,16 +234,16 @@ class _FeedbackCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final (typeColor, typeBg) = _typeColors(item.feedbackType);
+    final (typeColor, typeBg) = _typeColors(context, item.feedbackType);
 
     return Container(
       margin: const EdgeInsets.only(bottom: 10),
       decoration: BoxDecoration(
-        color: AppPalette.white,
+        color: context.pal.white,
         borderRadius: BorderRadius.circular(AppSpacing.cardRadius),
         border: Border.all(
           color:
-              item.isPending ? AppPalette.grey200 : AppPalette.grey100,
+              item.isPending ? context.pal.grey200 : context.pal.grey100,
         ),
       ),
       child: Column(
@@ -278,8 +278,8 @@ class _FeedbackCard extends StatelessWidget {
                   margin: const EdgeInsets.only(top: 3),
                   decoration: BoxDecoration(
                     color: item.isPending
-                        ? AppPalette.amber
-                        : AppPalette.green,
+                        ? context.pal.amber
+                        : context.pal.green,
                     shape: BoxShape.circle,
                   ),
                 ),
@@ -288,8 +288,8 @@ class _FeedbackCard extends StatelessWidget {
                   item.isPending ? 'Pending' : 'Addressed',
                   style: theme.textTheme.bodySmall?.copyWith(
                     color: item.isPending
-                        ? AppPalette.amber
-                        : AppPalette.green,
+                        ? context.pal.amber
+                        : context.pal.green,
                     fontWeight: FontWeight.w600,
                     fontSize: 11,
                   ),
@@ -308,7 +308,7 @@ class _FeedbackCard extends StatelessWidget {
                   child: Text(
                     item.targetLabel,
                     style: theme.textTheme.bodySmall?.copyWith(
-                      color: AppPalette.grey900,
+                      color: context.pal.grey900,
                       fontWeight: FontWeight.w600,
                       height: 1.35,
                     ),
@@ -325,7 +325,7 @@ class _FeedbackCard extends StatelessWidget {
               child: Text(
                 '"${item.note}"',
                 style: theme.textTheme.bodySmall?.copyWith(
-                  color: AppPalette.grey600,
+                  color: context.pal.grey600,
                   fontStyle: FontStyle.italic,
                   height: 1.4,
                 ),
@@ -338,14 +338,14 @@ class _FeedbackCard extends StatelessWidget {
             child: Text(
               _formatDate(item.createdAt),
               style: theme.textTheme.bodySmall
-                  ?.copyWith(color: AppPalette.grey400, fontSize: 11),
+                  ?.copyWith(color: context.pal.grey400, fontSize: 11),
             ),
           ),
-          const Divider(
+          Divider(
               height: 16,
               indent: 14,
               endIndent: 14,
-              color: AppPalette.grey100),
+              color: context.pal.grey100),
           Padding(
             padding: const EdgeInsets.fromLTRB(10, 0, 10, 10),
             child: Row(
@@ -358,15 +358,15 @@ class _FeedbackCard extends StatelessWidget {
                         : Icons.refresh,
                     size: 16,
                     color: item.isPending
-                        ? AppPalette.green
-                        : AppPalette.grey400,
+                        ? context.pal.green
+                        : context.pal.grey400,
                   ),
                   label: Text(
                     item.isPending ? 'Mark addressed' : 'Mark pending',
                     style: TextStyle(
                       color: item.isPending
-                          ? AppPalette.green
-                          : AppPalette.grey400,
+                          ? context.pal.green
+                          : context.pal.grey400,
                       fontSize: 13,
                     ),
                   ),
@@ -379,8 +379,8 @@ class _FeedbackCard extends StatelessWidget {
                 const Spacer(),
                 IconButton(
                   onPressed: onDelete,
-                  icon: const Icon(Icons.delete_outline,
-                      size: 18, color: AppPalette.red),
+                  icon: Icon(Icons.delete_outline,
+                      size: 18, color: context.pal.red),
                   tooltip: 'Delete',
                   padding: EdgeInsets.zero,
                   constraints:
@@ -394,28 +394,29 @@ class _FeedbackCard extends StatelessWidget {
     );
   }
 
-  (Color, Color) _typeColors(FeedbackType type) => switch (type) {
+  (Color, Color) _typeColors(BuildContext context, FeedbackType type) =>
+      switch (type) {
         FeedbackType.relevanceTooHigh =>
-          (AppPalette.red, const Color(0xFFFEE2E2)),
+          (context.pal.red, const Color(0xFFFEE2E2)),
         FeedbackType.relevanceTooLow =>
-          (AppPalette.amber, AppPalette.amberLight),
+          (context.pal.amber, context.pal.amberLight),
         FeedbackType.syllabusWrong =>
           (const Color(0xFF7C3AED), const Color(0xFFF5F3FF)),
         FeedbackType.schemeMissed =>
-          (AppPalette.green, AppPalette.greenLight),
+          (context.pal.green, context.pal.greenLight),
         FeedbackType.summaryPoor =>
           (const Color(0xFF0891B2), const Color(0xFFE0F7FA)),
         FeedbackType.incorrectInfo =>
-          (AppPalette.red, const Color(0xFFFEE2E2)),
+          (context.pal.red, const Color(0xFFFEE2E2)),
         FeedbackType.outdated =>
-          (AppPalette.amber, AppPalette.amberLight),
+          (context.pal.amber, context.pal.amberLight),
         FeedbackType.missingDetail =>
           (const Color(0xFF0891B2), const Color(0xFFE0F7FA)),
         FeedbackType.wrongClassification =>
           (const Color(0xFF7C3AED), const Color(0xFFF5F3FF)),
         FeedbackType.notUseful =>
-          (AppPalette.grey600, AppPalette.grey100),
-        FeedbackType.other => (AppPalette.grey600, AppPalette.grey100),
+          (context.pal.grey600, context.pal.grey100),
+        FeedbackType.other => (context.pal.grey600, context.pal.grey100),
       };
 
   String _formatDate(DateTime dt) {
@@ -435,17 +436,17 @@ class _TargetTypeBadge extends StatelessWidget {
   Widget build(BuildContext context) {
     final (color, bg) = switch (targetType) {
       ContentTargetType.post =>
-        (AppPalette.indigo, AppPalette.indigoLight),
+        (context.pal.indigo, context.pal.indigoLight),
       ContentTargetType.scheme =>
-        (AppPalette.green, AppPalette.greenLight),
+        (context.pal.green, context.pal.greenLight),
       ContentTargetType.entity =>
         (const Color(0xFF7C3AED), const Color(0xFFF5F3FF)),
       ContentTargetType.legalRef =>
-        (AppPalette.amber, AppPalette.amberLight),
+        (context.pal.amber, context.pal.amberLight),
       ContentTargetType.question =>
         (const Color(0xFF0D9488), const Color(0xFFF0FDFA)),
       ContentTargetType.app =>
-        (AppPalette.grey600, AppPalette.grey100),
+        (context.pal.grey600, context.pal.grey100),
     };
     return Container(
       margin: const EdgeInsets.only(top: 1),
