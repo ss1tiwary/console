@@ -126,6 +126,27 @@ final _examsListProvider =
   }
 });
 
+// Live missing qnos for a job — computed from the questions table so it stays
+// accurate after review deletions. Keyed by (importKeyPrefix, expectedCount).
+// importKeyPrefix = "{exam_slug}_{year}_{paper_slug}" (matches all qnos for the job).
+final liveMissingProvider = FutureProvider.autoDispose
+    .family<List<int>, ({String prefix, int expected})>((ref, args) async {
+  if (args.expected <= 0) return const [];
+  final rows = await ref
+      .watch(supabaseClientProvider)
+      .from('questions')
+      .select('original_qno')
+      .like('import_key', '${args.prefix}_%') as List<dynamic>;
+  final present = rows
+      .map((r) => (r as Map)['original_qno'] as int? ?? 0)
+      .where((n) => n > 0)
+      .toSet();
+  return [
+    for (int i = 1; i <= args.expected; i++)
+      if (!present.contains(i)) i
+  ];
+});
+
 final _papersListProvider =
     FutureProvider.autoDispose<List<({String paper, String paperSlug})>>((ref) async {
   final rows = await ref
@@ -1309,6 +1330,16 @@ class _JobDetailSheet extends ConsumerWidget {
         (job.report?['invalid'] as List?) ?? const [];
     final failed =
         (job.report?['failed_pages'] as List?) ?? const [];
+    final expected =
+        (cov?['expected_count'] as num?)?.toInt() ?? 0;
+    // Live gap from the questions table — reflects review deletions, unlike the
+    // frozen report.coverage.missing snapshot from extraction time.
+    final liveMissing = expected > 0
+        ? ref.watch(liveMissingProvider((
+            prefix: '${job.examSlug}_${job.year}_${job.paperSlug}',
+            expected: expected,
+          )))
+        : const AsyncValue<List<int>>.data(<int>[]);
 
     return Padding(
       padding: EdgeInsets.only(
@@ -1366,8 +1397,37 @@ class _JobDetailSheet extends ConsumerWidget {
                   exp > 0 ? '$found / $exp' : '$found', null);
             }()),
             if (missing.isNotEmpty)
-              _statRow(context, ('Missing qnos', missing.join(', '),
-                  context.pal.amber)),
+              _statRow(context, ('Missing at extraction',
+                  missing.join(', '), context.pal.amber)),
+            ...liveMissing.when(
+              loading: () => [
+                _statRow(context, ('Missing now', '…', context.pal.grey400)),
+              ],
+              error: (_, _) => const [],
+              data: (live) {
+                if (live.isEmpty) {
+                  return [
+                    _statRow(context, ('In DB now',
+                        'all $expected present', const Color(0xFF16A34A))),
+                  ];
+                }
+                // qnos gone from the DB that were present at extraction time =
+                // deletions during review.
+                final extractionMissing = {
+                  for (final m in missing) (m as num).toInt()
+                };
+                final deleted = live
+                    .where((q) => !extractionMissing.contains(q))
+                    .toList();
+                return [
+                  _statRow(context, ('Missing now (in DB)',
+                      live.join(', '), context.pal.amber)),
+                  if (deleted.isNotEmpty)
+                    _statRow(context, ('Deleted in review',
+                        deleted.join(', '), context.pal.red)),
+                ];
+              },
+            ),
             if (invalid.isNotEmpty)
               _statRow(context, ('Invalid (quarantined)',
                   '${invalid.length}', context.pal.amber)),
