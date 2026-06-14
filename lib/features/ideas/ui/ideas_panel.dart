@@ -3,6 +3,7 @@ import 'package:resolve_theme/resolve_theme.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/spacing.dart';
 import '../../../core/di/providers.dart';
+import '../../stories/ui/stories_panel.dart';
 
 // ── Model ─────────────────────────────────────────────────────────────────────
 
@@ -138,6 +139,7 @@ class _IdeasPanelState extends ConsumerState<IdeasPanel> {
                             'in_progress',
                             'done',
                             'dropped',
+                            'promoted',
                             'all'
                           ]
                               .map((s) => _FilterChip(
@@ -236,6 +238,12 @@ class _IdeasPanelState extends ConsumerState<IdeasPanel> {
           ref.invalidate(ideasProvider);
           Navigator.pop(context);
         },
+        onPromote: idea == null
+            ? null
+            : () {
+                Navigator.pop(context); // close the idea sheet
+                _promoteToStory(context, idea, apps);
+              },
         onDeleted: idea == null
             ? null
             : () {
@@ -253,11 +261,47 @@ class _IdeasPanelState extends ConsumerState<IdeasPanel> {
     );
   }
 
+  // Open the story editor prefilled from an idea. On save it inserts the story
+  // with source_idea_id and flips the idea to status 'promoted' (StorySheet
+  // handles both writes).
+  void _promoteToStory(BuildContext context, Idea idea, List<String> apps) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: context.pal.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (_) => StorySheet(
+        existingApps: apps,
+        sourceIdeaId: idea.id,
+        initialApp: idea.appName,
+        initialTitle: idea.title,
+        initialDescription: idea.body,
+        initialKind: _kindForCategory(idea.category),
+        initialPriority: idea.priority,
+        onSaved: () {
+          ref.invalidate(ideasProvider);
+          ref.invalidate(storiesProvider);
+          Navigator.pop(context);
+        },
+      ),
+    );
+  }
+
+  String _kindForCategory(String? category) => switch (category) {
+        'bug' => 'bug',
+        'design' => 'design',
+        'data' => 'chore',
+        _ => 'feature',
+      };
+
   String _statusLabel(String s) => switch (s) {
         'open' => 'Open',
         'in_progress' => 'In Progress',
         'done' => 'Done',
         'dropped' => 'Dropped',
+        'promoted' => 'Promoted',
         _ => 'All',
       };
 }
@@ -361,6 +405,8 @@ class _IdeaCard extends StatelessWidget {
         ('In Progress', context.pal.amber, context.pal.amberLight),
       'done' =>
         ('Done', const Color(0xFF16A34A), const Color(0xFFDCFCE7)),
+      'promoted' =>
+        ('Promoted', const Color(0xFF7C3AED), const Color(0xFFEDE9FE)),
       _ => ('Dropped', context.pal.grey600, context.pal.grey100),
     };
     return _chip(label, color, bg);
@@ -382,12 +428,14 @@ class _IdeaSheet extends ConsumerStatefulWidget {
   final List<String> existingApps;
   final VoidCallback onSaved;
   final VoidCallback? onDeleted;
+  final VoidCallback? onPromote;
 
   const _IdeaSheet({
     this.idea,
     required this.existingApps,
     required this.onSaved,
     this.onDeleted,
+    this.onPromote,
   });
 
   @override
@@ -519,9 +567,22 @@ class _IdeaSheetState extends ConsumerState<_IdeaSheet> {
             _DropdownField(
               label: 'Status',
               value: _status,
-              items: const ['open', 'in_progress', 'done', 'dropped'],
+              items: const [
+                'open', 'in_progress', 'done', 'dropped', 'promoted'
+              ],
               onChanged: (v) => setState(() => _status = v),
             ),
+          if (isEdit && widget.onPromote != null && _status != 'promoted') ...[
+            const SizedBox(height: 16),
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                onPressed: widget.onPromote,
+                icon: const Icon(Icons.north_east, size: 16),
+                label: const Text('Promote to story'),
+              ),
+            ),
+          ],
           const SizedBox(height: 20),
           Row(children: [
             if (isEdit && widget.onDeleted != null) ...[
