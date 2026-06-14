@@ -24,7 +24,9 @@ console/
       extraction/               # (Phase 3) PYQ extraction + Phase 4 preview
       feedback/                 # (Phase 3) moved from pibrief
       relevance/                # (Phase 3) moved from pibrief
-      ideas/                    # (Phase 3) moved from pibrief
+      ideas/                    # raw scratchpad (ideas table)
+      stories/                  # build-ready backlog (stories table); promote idea -> story
+  supabase/migrations/          # console-owned admin tables: 001_ideas, 002_stories
 ```
 
 ## Key invariants
@@ -35,6 +37,12 @@ console/
 - **`role` is read-only.** Console reads `users.role`; it never writes it. Setting editor
   access is a Supabase dashboard / service-role operation.
 - **Secrets:** `service_role` key is never in this app. Same rule as PIBrief.
+- **Console owns its admin-tooling tables.** `supabase/migrations/` here is the source of
+  truth for `ideas` (raw scratchpad) and `stories` (build-ready backlog) — both are Console
+  concerns, not the PIBrief content pillar (ideas was moved out of pibrief). The backlog flow
+  is **idea → story**: a story links its origin via `stories.source_idea_id`, and promoting an
+  idea flips its status to `'promoted'` so it leaves the raw list. Same RLS model as the rest:
+  `authenticated` full access, gated to editor/admin in the UI.
 - **`qbank_ui` renderer is shared.** Import from `package:qbank_ui/qbank_ui.dart`; never
   copy widget code here. `ResolveTheme` (from `package:resolve_theme`) registers a brand-aware
   `QbankTheme` for light + dark, so the renderer follows the active theme out of the box.
