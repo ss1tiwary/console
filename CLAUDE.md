@@ -37,6 +37,10 @@ console/
 - **`role` is read-only.** Console reads `users.role`; it never writes it. Setting editor
   access is a Supabase dashboard / service-role operation.
 - **Secrets:** `service_role` key is never in this app. Same rule as PIBrief.
+- **Console owns the section-registry config** (root `decisions/0003`). Surfaces render config- and
+  role-driven; the Console is where an editor toggles/relabels/reorders a surface's sections (a
+  `config_options` write) and sets `visible_to` roles — no rebuild. Visibility is config (UX);
+  authority is RLS (security).
 - **Console owns its admin-tooling tables.** `supabase/migrations/` here is the source of
   truth for `ideas` (raw scratchpad) and `stories` (build-ready backlog) — both are Console
   concerns, not the PIBrief content pillar (ideas was moved out of pibrief). The backlog flow
