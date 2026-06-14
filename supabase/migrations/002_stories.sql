@@ -50,6 +50,9 @@ CREATE POLICY "authenticated full access"
   WITH CHECK (true);
 
 GRANT SELECT, INSERT, UPDATE, DELETE ON public.stories TO authenticated;
+-- service_role is used by backend/admin tooling and bypasses RLS, but still needs
+-- the table grant (new tables don't inherit it automatically).
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.stories TO service_role;
 
 -- Promotion: an idea that becomes a story is marked 'promoted' so it drops out of
 -- the active idea list. Widen the existing ideas.status CHECK to allow it.

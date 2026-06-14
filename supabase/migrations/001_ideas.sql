@@ -44,3 +44,4 @@ CREATE POLICY "authenticated full access"
 
 -- Table-level grant (RLS policy alone is not enough in Postgres)
 GRANT SELECT, INSERT, UPDATE, DELETE ON public.ideas TO authenticated;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.ideas TO service_role;
