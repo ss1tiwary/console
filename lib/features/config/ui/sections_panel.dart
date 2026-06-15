@@ -19,7 +19,7 @@ final _sectionsProvider =
       .select('id, value, label, label_i18n, sort_order, active, metadata')
       .eq('category', 'ui_section')
       .eq('scope', _scope)
-      .order('sort_order');
+      .order('sort_order', ascending: true);
   return (rows as List).map((r) => (r as Map).cast<String, dynamic>()).toList();
 });
 
