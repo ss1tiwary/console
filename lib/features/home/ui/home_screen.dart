@@ -8,6 +8,7 @@ import '../../extraction/ui/extraction_panel.dart';
 import '../../feedback/ui/feedback_panel.dart';
 import '../../ideas/ui/ideas_panel.dart';
 import '../../stories/ui/stories_panel.dart';
+import '../../config/ui/sections_panel.dart';
 import '../../jobs/ui/jobs_panel.dart';
 import '../../relevance/ui/relevance_hub_panel.dart';
 
@@ -20,7 +21,8 @@ enum _Dest {
   feedback,
   relevance,
   ideas,
-  stories;
+  stories,
+  sections;
 
   String get label => switch (this) {
         _Dest.dashboard => 'Dashboard',
@@ -30,6 +32,7 @@ enum _Dest {
         _Dest.relevance => 'Relevance',
         _Dest.ideas => 'Ideas',
         _Dest.stories => 'Backlog',
+        _Dest.sections => 'Sections',
       };
 
   IconData get icon => switch (this) {
@@ -40,6 +43,7 @@ enum _Dest {
         _Dest.relevance => Icons.rate_review_outlined,
         _Dest.ideas => Icons.lightbulb_outline,
         _Dest.stories => Icons.view_kanban_outlined,
+        _Dest.sections => Icons.view_agenda_outlined,
       };
 
   IconData get selectedIcon => switch (this) {
@@ -50,6 +54,7 @@ enum _Dest {
         _Dest.relevance => Icons.rate_review,
         _Dest.ideas => Icons.lightbulb,
         _Dest.stories => Icons.view_kanban,
+        _Dest.sections => Icons.view_agenda,
       };
 }
 
@@ -138,6 +143,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         _Dest.relevance  => const RelevanceHubPanel(),
         _Dest.ideas      => const IdeasPanel(),
         _Dest.stories    => const StoriesPanel(),
+        _Dest.sections   => const SectionsPanel(),
       };
 }
 
