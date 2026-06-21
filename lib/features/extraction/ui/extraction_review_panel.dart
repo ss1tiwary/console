@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:resolve_theme/resolve_theme.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:qbank_contracts/qbank_contracts.dart';
 import 'package:qbank_ui/qbank_ui.dart';
 
 import '../../../core/config_options.dart';
@@ -35,19 +36,20 @@ class ReviewQuestion {
     this.flagNote,
   });
 
-  factory ReviewQuestion.fromJson(Map<String, dynamic> j) {
-    final meta = (j['generation_meta'] as Map?)?.cast<String, dynamic>();
+  factory ReviewQuestion.fromDto(QbankQuestionDto dto) {
     return ReviewQuestion(
-      id: j['id'] as String,
-      originalQno: (j['original_qno'] as num?)?.toInt(),
-      blocks: j['blocks'],
-      options: j['options'],
-      correctOption: j['correct_option'] as String?,
-      subject: j['subject'] as String?,
-      translations: (j['translations'] as Map?)?.cast<String, dynamic>(),
-      generationMeta: meta,
-      flagged: meta?['flagged'] == true,
-      flagNote: meta?['flag_note'] as String?,
+      id: dto.id,
+      originalQno: dto.originalQno,
+      blocks: dto.blocks,
+      options: dto.options,
+      correctOption: dto.correctOption,
+      subject: dto.subject,
+      translations: dto.translations is Map
+          ? Map<String, dynamic>.from(dto.translations as Map)
+          : null,
+      generationMeta: Map<String, dynamic>.from(dto.generationMeta),
+      flagged: dto.generationMeta['flagged'] == true,
+      flagNote: dto.generationMeta['flag_note'] as String?,
     );
   }
 
@@ -58,19 +60,18 @@ class ReviewQuestion {
     bool? flagged,
     String? flagNote,
     Map<String, dynamic>? generationMeta,
-  }) =>
-      ReviewQuestion(
-        id: id,
-        originalQno: originalQno ?? this.originalQno,
-        blocks: blocks,
-        options: options,
-        correctOption: correctOption ?? this.correctOption,
-        subject: subject ?? this.subject,
-        translations: translations,
-        generationMeta: generationMeta ?? this.generationMeta,
-        flagged: flagged ?? this.flagged,
-        flagNote: flagNote ?? this.flagNote,
-      );
+  }) => ReviewQuestion(
+    id: id,
+    originalQno: originalQno ?? this.originalQno,
+    blocks: blocks,
+    options: options,
+    correctOption: correctOption ?? this.correctOption,
+    subject: subject ?? this.subject,
+    translations: translations,
+    generationMeta: generationMeta ?? this.generationMeta,
+    flagged: flagged ?? this.flagged,
+    flagNote: flagNote ?? this.flagNote,
+  );
 }
 
 // Config dropdown values come from the shared `config_options` table via
@@ -79,21 +80,19 @@ class ReviewQuestion {
 // ── Provider ──────────────────────────────────────────────────────────────────
 
 final draftQuestionsProvider = FutureProvider.autoDispose
-    .family<List<ReviewQuestion>, (int, String)>((ref, key) async {
-  final (year, paper) = key;
-  final rows = await ref
-      .watch(supabaseClientProvider)
-      .from('questions')
-      .select(
-          'id, original_qno, blocks, options, correct_option, subject, translations, generation_meta, status')
-      .eq('year', year)
-      .eq('paper', paper)
-      .eq('status', 'draft')
-      .order('original_qno');
-  return (rows as List)
-      .map((r) => ReviewQuestion.fromJson((r as Map).cast<String, dynamic>()))
-      .toList();
-});
+    .family<List<ReviewQuestion>, (String, int, String)>((ref, key) async {
+      final (examSlug, year, paperSlug) = key;
+      final rows = await ref
+          .watch(qbankApiProvider)
+          .listDraftQuestions(
+            QbankDraftQuestionsRequestDto(
+              examSlug: examSlug,
+              year: year,
+              paperSlug: paperSlug,
+            ),
+          );
+      return rows.map(ReviewQuestion.fromDto).toList();
+    });
 
 // ── Panel ─────────────────────────────────────────────────────────────────────
 
@@ -103,8 +102,12 @@ class ExtractionReviewPanel extends ConsumerStatefulWidget {
   final ExtractionJob job;
   final VoidCallback? onBack;
   final VoidCallback? onShowStats;
-  const ExtractionReviewPanel(
-      {super.key, required this.job, this.onBack, this.onShowStats});
+  const ExtractionReviewPanel({
+    super.key,
+    required this.job,
+    this.onBack,
+    this.onShowStats,
+  });
 
   @override
   ConsumerState<ExtractionReviewPanel> createState() =>
@@ -119,7 +122,8 @@ class _ExtractionReviewPanelState extends ConsumerState<ExtractionReviewPanel> {
   /// don't trigger a full re-fetch + list rebuild on every tap.
   List<ReviewQuestion>? _items;
 
-  (int, String) get _key => (widget.job.year, widget.job.paper);
+  (String, int, String) get _key =>
+      (widget.job.examSlug, widget.job.year, widget.job.paperSlug);
 
   void _refresh() {
     setState(() => _items = null);
@@ -130,12 +134,14 @@ class _ExtractionReviewPanelState extends ConsumerState<ExtractionReviewPanel> {
     if (!mounted) return;
     ScaffoldMessenger.of(context)
       ..clearSnackBars()
-      ..showSnackBar(SnackBar(
-        content: Text(msg),
-        backgroundColor: error ? context.pal.red : context.pal.grey900,
-        behavior: SnackBarBehavior.floating,
-        duration: const Duration(seconds: 2),
-      ));
+      ..showSnackBar(
+        SnackBar(
+          content: Text(msg),
+          backgroundColor: error ? context.pal.red : context.pal.grey900,
+          behavior: SnackBarBehavior.floating,
+          duration: const Duration(seconds: 2),
+        ),
+      );
   }
 
   @override
@@ -149,7 +155,8 @@ class _ExtractionReviewPanelState extends ConsumerState<ExtractionReviewPanel> {
     final async = ref.watch(draftQuestionsProvider(_key));
     final items = _items;
     // DB-driven subject list (migration 013); built-in default until it loads.
-    final subjects = ref.watch(configOptionsProvider('question_subject')).valueOrNull ??
+    final subjects =
+        ref.watch(configOptionsProvider('question_subject')).valueOrNull ??
         defaultConfigOptions['question_subject']!;
 
     return Column(
@@ -172,30 +179,33 @@ class _ExtractionReviewPanelState extends ConsumerState<ExtractionReviewPanel> {
                   loading: () =>
                       const Center(child: CircularProgressIndicator()),
                   error: (e, _) => Center(child: Text('Error: $e')),
-                  data: (_) =>
-                      const Center(child: CircularProgressIndicator()),
+                  data: (_) => const Center(child: CircularProgressIndicator()),
                 )
               : items.isEmpty
-                  ? _EmptyState(status: widget.job.status)
-                  : ListView.separated(
-                      padding: const EdgeInsets.fromLTRB(
-                          AppSpacing.pagePadding, 16, AppSpacing.pagePadding, 32),
-                      itemCount: items.length,
-                      separatorBuilder: (_, _) => const SizedBox(height: 16),
-                      itemBuilder: (_, i) => _QuestionCard(
-                        key: ValueKey(items[i].id),
-                        question: items[i],
-                        job: widget.job,
-                        lang: _lang,
-                        subjects: subjects,
-                        onApprove: () => _approve(items[i]),
-                        onFlag: (note) => _flag(items[i], note),
-                        onDiscard: () => _discard(items[i]),
-                        onSubject: (s) => _setSubject(items[i], s),
-                        onAnswer: (a) => _setAnswer(items[i], a),
-                        onQno: (n) => _setQno(items[i], n),
-                      ),
-                    ),
+              ? _EmptyState(status: widget.job.status)
+              : ListView.separated(
+                  padding: const EdgeInsets.fromLTRB(
+                    AppSpacing.pagePadding,
+                    16,
+                    AppSpacing.pagePadding,
+                    32,
+                  ),
+                  itemCount: items.length,
+                  separatorBuilder: (_, _) => const SizedBox(height: 16),
+                  itemBuilder: (_, i) => _QuestionCard(
+                    key: ValueKey(items[i].id),
+                    question: items[i],
+                    job: widget.job,
+                    lang: _lang,
+                    subjects: subjects,
+                    onApprove: () => _approve(items[i]),
+                    onFlag: (note) => _flag(items[i], note),
+                    onDiscard: () => _discard(items[i]),
+                    onSubject: (s) => _setSubject(items[i], s),
+                    onAnswer: (a) => _setAnswer(items[i], a),
+                    onQno: (n) => _setQno(items[i], n),
+                  ),
+                ),
         ),
       ],
     );
@@ -204,13 +214,11 @@ class _ExtractionReviewPanelState extends ConsumerState<ExtractionReviewPanel> {
   Future<void> _approve(ReviewQuestion q) async {
     setState(() => _items!.removeWhere((x) => x.id == q.id));
     try {
-      final uid = ref.read(supabaseClientProvider).auth.currentUser?.id;
-      await ref.read(supabaseClientProvider).from('questions').update({
-        'status': 'published',
-        'verified': true,
-        'reviewed_by': uid,
-        'reviewed_at': DateTime.now().toUtc().toIso8601String(),
-      }).eq('id', q.id);
+      await ref
+          .read(qbankApiProvider)
+          .reviewQuestion(
+            QbankReviewQuestionRequestDto(questionId: q.id, action: 'publish'),
+          );
       _snack('Approved Q${q.originalQno ?? ''} — published');
     } catch (e) {
       _snack('Approve failed: $e', error: true);
@@ -231,16 +239,22 @@ class _ExtractionReviewPanelState extends ConsumerState<ExtractionReviewPanel> {
       final i = _items!.indexWhere((x) => x.id == q.id);
       if (i >= 0) {
         _items![i] = q.copyWith(
-            flagged: true,
-            flagNote: note.isEmpty ? null : note,
-            generationMeta: meta);
+          flagged: true,
+          flagNote: note.isEmpty ? null : note,
+          generationMeta: meta,
+        );
       }
     });
     try {
       await ref
-          .read(supabaseClientProvider)
-          .from('questions')
-          .update({'generation_meta': meta}).eq('id', q.id);
+          .read(qbankApiProvider)
+          .reviewQuestion(
+            QbankReviewQuestionRequestDto(
+              questionId: q.id,
+              action: 'update',
+              patch: {'generationMeta': meta},
+            ),
+          );
       _snack('Flag saved');
     } catch (e) {
       _snack('Flag failed: $e', error: true);
@@ -252,11 +266,10 @@ class _ExtractionReviewPanelState extends ConsumerState<ExtractionReviewPanel> {
     setState(() => _items!.removeWhere((x) => x.id == q.id));
     try {
       await ref
-          .read(supabaseClientProvider)
-          .from('questions')
-          .delete()
-          .eq('id', q.id)
-          .eq('status', 'draft');
+          .read(qbankApiProvider)
+          .reviewQuestion(
+            QbankReviewQuestionRequestDto(questionId: q.id, action: 'discard'),
+          );
       _snack('Discarded Q${q.originalQno ?? ''}');
     } catch (e) {
       _snack('Discard failed: $e', error: true);
@@ -265,7 +278,7 @@ class _ExtractionReviewPanelState extends ConsumerState<ExtractionReviewPanel> {
   }
 
   // ── Inline field overrides (subject / answer / qno) ─────────────────────────
-  // Each preserves the AI's original value in generation_meta the first time it's
+  // Each preserves the AI's original value in generation metadata the first time it's
   // changed, so `*_extracted ≠ final` is a queryable extraction-error signal for
   // prompt refinement. The card stays put (unlike approve/discard).
 
@@ -275,14 +288,26 @@ class _ExtractionReviewPanelState extends ConsumerState<ExtractionReviewPanel> {
   }
 
   Future<void> _override(
-      ReviewQuestion q, String column, String extractedKey, Object? extractedVal,
-      Object? newVal, ReviewQuestion updated) async {
+    ReviewQuestion q,
+    String patchKey,
+    String extractedKey,
+    Object? extractedVal,
+    Object? newVal,
+    ReviewQuestion updated,
+  ) async {
     final meta = Map<String, dynamic>.from(q.generationMeta ?? {});
     meta.putIfAbsent(extractedKey, () => extractedVal);
     setState(() => _replaceItem(updated.copyWith(generationMeta: meta)));
     try {
-      await ref.read(supabaseClientProvider).from('questions').update(
-          {column: newVal, 'generation_meta': meta}).eq('id', q.id);
+      await ref
+          .read(qbankApiProvider)
+          .reviewQuestion(
+            QbankReviewQuestionRequestDto(
+              questionId: q.id,
+              action: 'update',
+              patch: {patchKey: newVal, 'generationMeta': meta},
+            ),
+          );
     } catch (e) {
       _snack('Save failed: $e', error: true);
       _refresh();
@@ -290,16 +315,31 @@ class _ExtractionReviewPanelState extends ConsumerState<ExtractionReviewPanel> {
   }
 
   Future<void> _setSubject(ReviewQuestion q, String subject) => _override(
-      q, 'subject', 'subject_extracted', q.subject, subject,
-      q.copyWith(subject: subject));
+    q,
+    'subject',
+    'subject_extracted',
+    q.subject,
+    subject,
+    q.copyWith(subject: subject),
+  );
 
   Future<void> _setAnswer(ReviewQuestion q, String opt) => _override(
-      q, 'correct_option', 'correct_option_extracted', q.correctOption, opt,
-      q.copyWith(correctOption: opt));
+    q,
+    'correctOption',
+    'correctOptionExtracted',
+    q.correctOption,
+    opt,
+    q.copyWith(correctOption: opt),
+  );
 
   Future<void> _setQno(ReviewQuestion q, int qno) => _override(
-      q, 'original_qno', 'original_qno_extracted', q.originalQno, qno,
-      q.copyWith(originalQno: qno));
+    q,
+    'originalQno',
+    'originalQnoExtracted',
+    q.originalQno,
+    qno,
+    q.copyWith(originalQno: qno),
+  );
 }
 
 // ── Header ────────────────────────────────────────────────────────────────────
@@ -354,13 +394,14 @@ class _Header extends ConsumerWidget {
             children: [
               if (onBack != null)
                 IconButton(
-                  icon:
-                      const Icon(Icons.arrow_back_ios_new_rounded, size: 18),
+                  icon: const Icon(Icons.arrow_back_ios_new_rounded, size: 18),
                   tooltip: 'Back',
                   onPressed: onBack,
                   padding: EdgeInsets.zero,
-                  constraints:
-                      const BoxConstraints(minWidth: 36, minHeight: 36),
+                  constraints: const BoxConstraints(
+                    minWidth: 36,
+                    minHeight: 36,
+                  ),
                 )
               else
                 const SizedBox(width: 8),
@@ -371,16 +412,18 @@ class _Header extends ConsumerWidget {
                   children: [
                     Text(
                       titleStr,
-                      style: theme.textTheme.titleSmall
-                          ?.copyWith(fontWeight: FontWeight.w700),
+                      style: theme.textTheme.titleSmall?.copyWith(
+                        fontWeight: FontWeight.w700,
+                      ),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),
                     if (showExamSubtitle)
                       Text(
                         exam,
-                        style: theme.textTheme.bodySmall
-                            ?.copyWith(color: context.pal.grey400),
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: context.pal.grey400,
+                        ),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                       ),
@@ -393,16 +436,17 @@ class _Header extends ConsumerWidget {
                   tooltip: 'Job stats & publish',
                   onPressed: onShowStats,
                   padding: EdgeInsets.zero,
-                  constraints:
-                      const BoxConstraints(minWidth: 40, minHeight: 36),
+                  constraints: const BoxConstraints(
+                    minWidth: 40,
+                    minHeight: 36,
+                  ),
                 ),
               IconButton(
                 icon: const Icon(Icons.refresh, size: 20),
                 tooltip: 'Refresh questions',
                 onPressed: onRefresh,
                 padding: EdgeInsets.zero,
-                constraints:
-                    const BoxConstraints(minWidth: 40, minHeight: 36),
+                constraints: const BoxConstraints(minWidth: 40, minHeight: 36),
               ),
             ],
           ),
@@ -437,24 +481,24 @@ class _CountPill extends StatelessWidget {
   final String label;
   final Color? color;
   final Color? bg;
-  const _CountPill({
-    required this.label,
-    this.color,
-    this.bg,
-  });
+  const _CountPill({required this.label, this.color, this.bg});
 
   @override
   Widget build(BuildContext context) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
       decoration: BoxDecoration(
-          color: bg ?? context.pal.grey100,
-          borderRadius: BorderRadius.circular(20)),
-      child: Text(label,
-          style: TextStyle(
-              fontSize: 11,
-              fontWeight: FontWeight.w700,
-              color: color ?? context.pal.grey600)),
+        color: bg ?? context.pal.grey100,
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(
+          fontSize: 11,
+          fontWeight: FontWeight.w700,
+          color: color ?? context.pal.grey600,
+        ),
+      ),
     );
   }
 }
@@ -483,16 +527,18 @@ class _EmptyState extends StatelessWidget {
           const SizedBox(height: 12),
           Text(
             allDone ? 'All drafts reviewed.' : 'No draft questions yet.',
-            style:
-                theme.textTheme.bodyMedium?.copyWith(color: context.pal.grey600),
+            style: theme.textTheme.bodyMedium?.copyWith(
+              color: context.pal.grey600,
+            ),
           ),
           const SizedBox(height: 4),
           Text(
             allDone
                 ? 'Nothing left to approve or discard.'
                 : 'Extraction may still be in progress.',
-            style:
-                theme.textTheme.bodySmall?.copyWith(color: context.pal.grey400),
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: context.pal.grey400,
+            ),
           ),
         ],
       ),
@@ -530,20 +576,57 @@ class _QuestionCard extends StatelessWidget {
 
   // Small context chip (Q / Set / year / paper / subject), mirroring PIBrief's
   // question-card chips so reviewers see the same metadata at a glance.
-  Widget _ctxChip(BuildContext context, ThemeData theme, String label,
-      {bool accent = false}) {
+  Widget _ctxChip(
+    BuildContext context,
+    ThemeData theme,
+    String label, {
+    bool accent = false,
+  }) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
       decoration: BoxDecoration(
         color: accent ? context.pal.indigoLight : context.pal.grey100,
         borderRadius: BorderRadius.circular(6),
       ),
-      child: Text(label,
-          style: theme.textTheme.labelSmall?.copyWith(
-              fontSize: 11,
-              fontWeight: FontWeight.w600,
-              color: accent ? context.pal.indigo : context.pal.grey600)),
+      child: Text(
+        label,
+        style: theme.textTheme.labelSmall?.copyWith(
+          fontSize: 11,
+          fontWeight: FontWeight.w600,
+          color: accent ? context.pal.indigo : context.pal.grey600,
+        ),
+      ),
     );
+  }
+
+  List<Widget> _healthChips(BuildContext context, ThemeData theme) {
+    final health =
+        (question.generationMeta?['extraction_health'] as Map?)?.cast<String, dynamic>();
+    if (health == null || health.isEmpty) return const [];
+
+    Widget chip(String label, bool ok) => Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: ok ? context.pal.green.withValues(alpha: 0.10) : context.pal.amber.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: Text(
+        label,
+        style: theme.textTheme.labelSmall?.copyWith(
+          fontSize: 11,
+          fontWeight: FontWeight.w600,
+          color: ok ? context.pal.green : context.pal.amber,
+        ),
+      ),
+    );
+
+    return [
+      chip('EN', health['english_present'] == true),
+      chip('HI', health['hindi_present'] == true),
+      chip('keys', health['option_keys_match'] != false),
+      chip('language', health['language_check_passed'] != false),
+      if (health['repaired'] == true) chip('repaired', true),
+    ];
   }
 
   // ── Override box: correct subject / answer / qno before approving ──────────
@@ -561,12 +644,15 @@ class _QuestionCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('REVIEW · CORRECT BEFORE APPROVE',
-              style: theme.textTheme.labelSmall?.copyWith(
-                  fontSize: 10,
-                  letterSpacing: 1,
-                  fontWeight: FontWeight.w700,
-                  color: context.pal.amber)),
+          Text(
+            'REVIEW · CORRECT BEFORE APPROVE',
+            style: theme.textTheme.labelSmall?.copyWith(
+              fontSize: 10,
+              letterSpacing: 1,
+              fontWeight: FontWeight.w700,
+              color: context.pal.amber,
+            ),
+          ),
           const SizedBox(height: 10),
           _overrideRow(
             context,
@@ -577,32 +663,40 @@ class _QuestionCard extends StatelessWidget {
               onTap: () => _pickSubject(context),
               borderRadius: BorderRadius.circular(8),
               child: Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 6,
+                ),
                 decoration: BoxDecoration(
                   color: subjEdited
                       ? context.pal.amberLight
                       : context.pal.white,
                   border: Border.all(
-                      color: subjEdited
-                          ? context.pal.amber
-                          : context.pal.grey300),
+                    color: subjEdited ? context.pal.amber : context.pal.grey300,
+                  ),
                   borderRadius: BorderRadius.circular(8),
                 ),
-                child: Row(mainAxisSize: MainAxisSize.min, children: [
-                  Text(
-                    (q.subject?.trim().isNotEmpty ?? false)
-                        ? q.subject!
-                        : 'Set subject',
-                    style: theme.textTheme.bodyMedium?.copyWith(
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      (q.subject?.trim().isNotEmpty ?? false)
+                          ? q.subject!
+                          : 'Set subject',
+                      style: theme.textTheme.bodyMedium?.copyWith(
                         fontWeight: FontWeight.w600,
                         color: (q.subject?.trim().isNotEmpty ?? false)
                             ? context.pal.grey900
-                            : context.pal.grey400),
-                  ),
-                  Icon(Icons.arrow_drop_down,
-                      size: 18, color: context.pal.grey600),
-                ]),
+                            : context.pal.grey400,
+                      ),
+                    ),
+                    Icon(
+                      Icons.arrow_drop_down,
+                      size: 18,
+                      color: context.pal.grey600,
+                    ),
+                  ],
+                ),
               ),
             ),
           ),
@@ -612,7 +706,9 @@ class _QuestionCard extends StatelessWidget {
             theme,
             'Answer',
             child: _AnswerSelector(
-                selected: q.correctOption, onSelect: onAnswer),
+              selected: q.correctOption,
+              onSelect: onAnswer,
+            ),
           ),
           const SizedBox(height: 8),
           _overrideRow(
@@ -623,16 +719,21 @@ class _QuestionCard extends StatelessWidget {
               onTap: () => _editQno(context),
               borderRadius: BorderRadius.circular(8),
               child: Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 14,
+                  vertical: 6,
+                ),
                 decoration: BoxDecoration(
                   color: context.pal.white,
                   border: Border.all(color: context.pal.grey300),
                   borderRadius: BorderRadius.circular(8),
                 ),
-                child: Text(q.originalQno?.toString() ?? '—',
-                    style: theme.textTheme.bodyMedium
-                        ?.copyWith(fontWeight: FontWeight.w600)),
+                child: Text(
+                  q.originalQno?.toString() ?? '—',
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
               ),
             ),
           ),
@@ -641,19 +742,30 @@ class _QuestionCard extends StatelessWidget {
     );
   }
 
-  Widget _overrideRow(BuildContext context, ThemeData theme, String label,
-      {String? aiHint, required Widget child}) {
+  Widget _overrideRow(
+    BuildContext context,
+    ThemeData theme,
+    String label, {
+    String? aiHint,
+    required Widget child,
+  }) {
     return Row(
       children: [
         Expanded(
-          child: Text(label,
-              style: theme.textTheme.bodyMedium
-                  ?.copyWith(color: context.pal.grey700)),
+          child: Text(
+            label,
+            style: theme.textTheme.bodyMedium?.copyWith(
+              color: context.pal.grey700,
+            ),
+          ),
         ),
         if (aiHint != null) ...[
-          Text(aiHint,
-              style: theme.textTheme.labelSmall
-                  ?.copyWith(color: context.pal.grey400)),
+          Text(
+            aiHint,
+            style: theme.textTheme.labelSmall?.copyWith(
+              color: context.pal.grey400,
+            ),
+          ),
           const SizedBox(width: 8),
         ],
         child,
@@ -670,11 +782,12 @@ class _QuestionCard extends StatelessWidget {
           children: [
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
-              child: Text('Subject',
-                  style: Theme.of(sheet)
-                      .textTheme
-                      .titleMedium
-                      ?.copyWith(fontWeight: FontWeight.w700)),
+              child: Text(
+                'Subject',
+                style: Theme.of(
+                  sheet,
+                ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
+              ),
             ),
             for (final s in subjects)
               ListTile(
@@ -694,8 +807,9 @@ class _QuestionCard extends StatelessWidget {
   }
 
   Future<void> _editQno(BuildContext context) async {
-    final ctrl =
-        TextEditingController(text: question.originalQno?.toString() ?? '');
+    final ctrl = TextEditingController(
+      text: question.originalQno?.toString() ?? '',
+    );
     final res = await showDialog<int>(
       context: context,
       builder: (d) => AlertDialog(
@@ -708,7 +822,9 @@ class _QuestionCard extends StatelessWidget {
         ),
         actions: [
           TextButton(
-              onPressed: () => Navigator.pop(d), child: const Text('Cancel')),
+            onPressed: () => Navigator.pop(d),
+            child: const Text('Cancel'),
+          ),
           FilledButton(
             onPressed: () {
               final n = int.tryParse(ctrl.text.trim());
@@ -723,13 +839,21 @@ class _QuestionCard extends StatelessWidget {
   }
 
   // Renders one language's block document + options, or an empty-state line.
-  List<Widget> _section(BuildContext context, ThemeData theme,
-      QuestionDocument? d, String? correctOption, String emptyMsg) {
+  List<Widget> _section(
+    BuildContext context,
+    ThemeData theme,
+    QuestionDocument? d,
+    String? correctOption,
+    String emptyMsg,
+  ) {
     if (d == null) {
       return [
-        Text(emptyMsg,
-            style: theme.textTheme.bodySmall
-                ?.copyWith(color: context.pal.grey400)),
+        Text(
+          emptyMsg,
+          style: theme.textTheme.bodySmall?.copyWith(
+            color: context.pal.grey400,
+          ),
+        ),
       ];
     }
     return [
@@ -741,16 +865,19 @@ class _QuestionCard extends StatelessWidget {
 
   // "हिंदी" label + rule separating the stacked English and Hindi views.
   Widget _hindiLabel(BuildContext context, ThemeData theme) => Row(
-        children: [
-          Text('हिंदी',
-              style: theme.textTheme.labelSmall?.copyWith(
-                  color: context.pal.grey600,
-                  fontWeight: FontWeight.w700,
-                  letterSpacing: 1)),
-          const SizedBox(width: 8),
-          Expanded(child: Divider(color: context.pal.grey200, height: 1)),
-        ],
-      );
+    children: [
+      Text(
+        'हिंदी',
+        style: theme.textTheme.labelSmall?.copyWith(
+          color: context.pal.grey600,
+          fontWeight: FontWeight.w700,
+          letterSpacing: 1,
+        ),
+      ),
+      const SizedBox(width: 8),
+      Expanded(child: Divider(color: context.pal.grey200, height: 1)),
+    ],
+  );
 
   @override
   Widget build(BuildContext context) {
@@ -796,14 +923,19 @@ class _QuestionCard extends StatelessWidget {
                   runSpacing: 6,
                   children: [
                     if (q.originalQno != null)
-                      _ctxChip(context, theme, 'Q ${q.originalQno}',
-                          accent: true),
+                      _ctxChip(
+                        context,
+                        theme,
+                        'Q ${q.originalQno}',
+                        accent: true,
+                      ),
                     if (job.paperSet.trim().isNotEmpty)
                       _ctxChip(context, theme, 'Set ${job.paperSet}'),
                     if (job.year > 0)
                       _ctxChip(context, theme, 'PYQ ${job.year}'),
                     if (job.paper.trim().isNotEmpty)
                       _ctxChip(context, theme, job.paper),
+                    ..._healthChips(context, theme),
                   ],
                 ),
                 const SizedBox(height: 12),
@@ -812,8 +944,13 @@ class _QuestionCard extends StatelessWidget {
                 // ── EN + HI stacked (default), or one focused via the toggle ──
                 // English shown for Both and EN.
                 if (lang != _Lang.hi)
-                  ..._section(context, theme, doc, q.correctOption,
-                      'No block document — legacy row.'),
+                  ..._section(
+                    context,
+                    theme,
+                    doc,
+                    q.correctOption,
+                    'No block document — legacy row.',
+                  ),
                 // Hindi divider, only in Both when a Hindi doc exists.
                 if (lang == _Lang.both && hiDoc != null) ...[
                   const SizedBox(height: 18),
@@ -821,10 +958,14 @@ class _QuestionCard extends StatelessWidget {
                   const SizedBox(height: 12),
                 ],
                 // Hindi shown for Both (if present) and HI.
-                if (lang == _Lang.hi ||
-                    (lang == _Lang.both && hiDoc != null))
-                  ..._section(context, theme, hiDoc, q.correctOption,
-                      'No Hindi translation captured for this question.'),
+                if (lang == _Lang.hi || (lang == _Lang.both && hiDoc != null))
+                  ..._section(
+                    context,
+                    theme,
+                    hiDoc,
+                    q.correctOption,
+                    'No Hindi translation captured for this question.',
+                  ),
                 const SizedBox(height: 16),
                 Divider(height: 1, color: context.pal.grey100),
                 const SizedBox(height: 12),
@@ -844,18 +985,23 @@ class _QuestionCard extends StatelessWidget {
                     const SizedBox(width: 8),
                     OutlinedButton.icon(
                       style: OutlinedButton.styleFrom(
-                        foregroundColor:
-                            q.flagged ? context.pal.amber : context.pal.grey700,
+                        foregroundColor: q.flagged
+                            ? context.pal.amber
+                            : context.pal.grey700,
                         side: BorderSide(
-                            color: q.flagged
-                                ? context.pal.amber
-                                : context.pal.grey300),
+                          color: q.flagged
+                              ? context.pal.amber
+                              : context.pal.grey300,
+                        ),
                         padding: const EdgeInsets.symmetric(
-                            horizontal: 14, vertical: 12),
+                          horizontal: 14,
+                          vertical: 12,
+                        ),
                       ),
                       icon: Icon(
-                          q.flagged ? Icons.flag : Icons.flag_outlined,
-                          size: 16),
+                        q.flagged ? Icons.flag : Icons.flag_outlined,
+                        size: 16,
+                      ),
                       label: Text(q.flagged ? 'Edit flag' : 'Flag'),
                       onPressed: () => _showFlagDialog(context),
                     ),
@@ -867,7 +1013,8 @@ class _QuestionCard extends StatelessWidget {
                       style: IconButton.styleFrom(
                         side: BorderSide(color: context.pal.grey300),
                         shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(8)),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
                         padding: const EdgeInsets.all(10),
                       ),
                       onPressed: () => _showDiscardDialog(context),
@@ -895,10 +1042,9 @@ class _QuestionCard extends StatelessWidget {
             Text(
               'Saved to the question for later correction. The draft stays in '
               'the list — flagging does not remove it.',
-              style: Theme.of(ctx)
-                  .textTheme
-                  .bodySmall
-                  ?.copyWith(color: context.pal.grey600),
+              style: Theme.of(
+                ctx,
+              ).textTheme.bodySmall?.copyWith(color: context.pal.grey600),
             ),
             const SizedBox(height: 14),
             TextField(
@@ -923,8 +1069,9 @@ class _QuestionCard extends StatelessWidget {
               child: const Text('Clear note'),
             ),
           TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: const Text('Cancel')),
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel'),
+          ),
           FilledButton(
             style: FilledButton.styleFrom(backgroundColor: context.pal.amber),
             onPressed: () {
@@ -950,8 +1097,9 @@ class _QuestionCard extends StatelessWidget {
         ),
         actions: [
           TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: const Text('Cancel')),
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel'),
+          ),
           FilledButton(
             style: FilledButton.styleFrom(backgroundColor: context.pal.red),
             onPressed: () {
@@ -992,22 +1140,31 @@ class _FlagBanner extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text('Flagged for correction',
-                        style: theme.textTheme.labelMedium?.copyWith(
-                            color: context.pal.amber,
-                            fontWeight: FontWeight.w700)),
+                    Text(
+                      'Flagged for correction',
+                      style: theme.textTheme.labelMedium?.copyWith(
+                        color: context.pal.amber,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
                     if (hasNote) ...[
                       const SizedBox(height: 2),
-                      Text(note!,
-                          style: theme.textTheme.bodySmall
-                              ?.copyWith(color: context.pal.grey800)),
+                      Text(
+                        note!,
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: context.pal.grey800,
+                        ),
+                      ),
                     ],
                   ],
                 ),
               ),
               const SizedBox(width: 8),
-              Icon(Icons.edit_outlined,
-                  size: 15, color: context.pal.amber.withValues(alpha: 0.8)),
+              Icon(
+                Icons.edit_outlined,
+                size: 15,
+                color: context.pal.amber.withValues(alpha: 0.8),
+              ),
             ],
           ),
         ),
@@ -1040,17 +1197,21 @@ class _AnswerSelector extends StatelessWidget {
               behavior: HitTestBehavior.opaque,
               onTap: () => onSelect(k),
               child: Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 11, vertical: 6),
-                color:
-                    selected == k ? context.pal.indigo : context.pal.white,
-                child: Text(k,
-                    style: TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w600,
-                        color: selected == k
-                            ? context.pal.white
-                            : context.pal.grey600)),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 11,
+                  vertical: 6,
+                ),
+                color: selected == k ? context.pal.indigo : context.pal.white,
+                child: Text(
+                  k,
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: selected == k
+                        ? context.pal.white
+                        : context.pal.grey600,
+                  ),
+                ),
               ),
             ),
         ],
