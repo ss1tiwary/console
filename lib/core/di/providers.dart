@@ -1,5 +1,8 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:qbank_contracts/qbank_contracts.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import '../../features/extraction/data/supabase_qbank_api.dart';
+import '../../features/extraction/data/extraction_repository.dart';
 import '../../features/feedback/data/feedback_repository.dart';
 
 // Auth state, editor gate, and auth adapter come from the shared identity
@@ -23,4 +26,15 @@ final supabaseClientProvider = Provider<SupabaseClient>(
 
 final feedbackRepositoryProvider = Provider<FeedbackRepository>(
   (ref) => FeedbackRepository(ref.watch(supabaseClientProvider)),
+);
+
+final qbankApiProvider = Provider<QbankApi>(
+  (ref) => SupabaseQbankApi(ref.watch(supabaseClientProvider)),
+);
+
+final extractionRepositoryProvider = Provider<ExtractionRepository>(
+  (ref) => ExtractionRepository(
+    ref.watch(supabaseClientProvider),
+    ref.watch(qbankApiProvider),
+  ),
 );
