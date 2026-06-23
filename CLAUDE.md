@@ -36,6 +36,19 @@ console/
   `/denied`. This is the one place to change the gate — don't add a second.
 - **`role` is read-only.** Console reads `users.role`; it never writes it. Setting editor
   access is a Supabase dashboard / service-role operation.
+- **Feature-flow layering:** base chain is `UI → Controller → Repository Port → Adapter`; the
+  Supabase port is always present. Add a `UseCase` between controller and port when the action is
+  user-visible, reused, multi-step, server-governed, security-sensitive, or likely to grow — bar is
+  low, a 50/50 call tips toward adding it; skip only a trivial single read (PRINCIPLES #10; root `decisions/0006`, `0007`). The UI must
+  not call Supabase directly — DB access (`.from(`/`.rpc(`/`.storage.from(`) and DB table/column
+  names belong in `features/*/data/` adapters, never in `features/*/ui/`.
+  **Known debt:** the existing panels in `features/*/ui/` predate this rule and still query
+  Supabase inline (see the grandfather allowlist in `test/architecture_test.dart`); new panels
+  must follow the chain, and the allowlist must drain to empty — never grow.
+- **Screens are agent-driveable** (root `decisions/0008`, PRINCIPLES #12). Meaningful state (which
+  record/filter/tab) lives in a GoRouter route + typed params, not `setState`; use GoRouter routes
+  not `Navigator.push`; navigate via standard GoRouter, no nav wrapper. An agent operates the Console
+  through the same routes + named operations a user does.
 - **Secrets:** `service_role` key is never in this app. Same rule as PIBrief.
 - **Console owns the section-registry config** (root `decisions/0003`). Surfaces render config- and
   role-driven; the Console is where an editor toggles/relabels/reorders a surface's sections (a
