@@ -20,10 +20,13 @@ class ExtractionRepository {
     required String? fileExtension,
     required Uint8List bytes,
     required bool isImage,
+    required String mode,
+    required int pageScope,
     required String layout,
     required bool wantHindi,
     required int expectedCount,
     required int startPage,
+    required int endPage,
     required int pageStep,
     required int hindiOffset,
     required String modelProvider,
@@ -32,8 +35,9 @@ class ExtractionRepository {
   }) async {
     final rand = Random().nextInt(1 << 32).toRadixString(16);
     final path = '$year/${paperSlug}_${rand}_$fileName';
+    final ext = fileExtension?.toLowerCase();
     final contentType = isImage
-        ? 'image/${fileExtension?.toLowerCase()}'
+        ? (ext == 'png' ? 'image/png' : 'image/jpeg')
         : 'application/pdf';
 
     await _client.storage
@@ -53,11 +57,15 @@ class ExtractionRepository {
           'paper': paper,
           'paper_set': paperSet,
           'layout': layout,
+          'mode': mode,
+          'input_type': isImage ? 'image' : 'pdf',
+          if (pageScope > 0) 'page_scope': pageScope,
           'pdf_path': path,
           'pdf_name': fileName,
           'want_hindi': wantHindi,
           'expected_count': expectedCount,
           'start_page': startPage,
+          if (endPage > 0) 'end_page': endPage,
           'page_step': pageStep,
           'hindi_offset': hindiOffset,
           'model_provider': modelProvider,

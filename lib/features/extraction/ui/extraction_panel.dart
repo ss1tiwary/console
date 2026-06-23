@@ -20,6 +20,7 @@ class ExtractionJob {
   final String paperSet;
   final String? pdfName;
   final String status;
+  final Map<String, dynamic> params;
   final Map<String, dynamic> progress;
   final Map<String, dynamic>? report;
   final String? error;
@@ -34,6 +35,7 @@ class ExtractionJob {
     required this.paperSet,
     this.pdfName,
     required this.status,
+    required this.params,
     required this.progress,
     this.report,
     this.error,
@@ -41,6 +43,13 @@ class ExtractionJob {
   });
 
   String get examLabel => examSlug.replaceAll('_', ' ').toUpperCase();
+
+  String get mode {
+    final raw = (report?['mode'] ?? params['mode'])?.toString();
+    return raw == 'adhoc' ? 'adhoc' : 'full_paper';
+  }
+
+  bool get isAdhoc => mode == 'adhoc';
 
   factory ExtractionJob.fromDto(QbankExtractionJobDto dto) {
     return ExtractionJob(
@@ -52,6 +61,7 @@ class ExtractionJob {
       paperSet: dto.paperSet,
       pdfName: dto.pdfName,
       status: dto.status,
+      params: Map<String, dynamic>.from(dto.params),
       progress: Map<String, dynamic>.from(dto.progress),
       report: dto.report.isEmpty ? null : Map<String, dynamic>.from(dto.report),
       error: dto.error,
@@ -387,10 +397,10 @@ class _JobListBody extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final active = jobs
-        .where((j) => j.status == 'pending' || j.status == 'running')
+        .where((j) => _activeExtractionStatuses.contains(j.status))
         .toList();
     final recent = jobs
-        .where((j) => j.status != 'pending' && j.status != 'running')
+        .where((j) => !_activeExtractionStatuses.contains(j.status))
         .toList();
 
     return ListView(
@@ -528,6 +538,8 @@ class _JobCard extends ConsumerWidget {
                   ),
                 ),
                 const SizedBox(width: 8),
+                _ModeChip(isAdhoc: job.isAdhoc),
+                const SizedBox(width: 6),
                 _StatusChip(status: job.status),
                 PopupMenuButton<String>(
                   icon: Icon(
@@ -674,6 +686,33 @@ class _JobCard extends ConsumerWidget {
   }
 }
 
+class _ModeChip extends StatelessWidget {
+  final bool isAdhoc;
+  const _ModeChip({required this.isAdhoc});
+
+  @override
+  Widget build(BuildContext context) {
+    final label = isAdhoc ? 'ADHOC' : 'FULL';
+    final color = isAdhoc ? context.pal.indigo : context.pal.grey600;
+    final bg = isAdhoc ? context.pal.indigoLight : context.pal.grey100;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(
+          fontSize: 9,
+          fontWeight: FontWeight.w800,
+          color: color,
+        ),
+      ),
+    );
+  }
+}
+
 class _StatusChip extends StatelessWidget {
   final String status;
   const _StatusChip({required this.status});
@@ -795,35 +834,39 @@ extension _LayoutPresetX on _LayoutPreset {
   };
 }
 
-enum _ExtractionModelPreset { groqScout, geminiFlash, openRouterQwen }
+enum _ExtractionProvider { gemini, groq, openRouter }
 
-extension _ExtractionModelPresetX on _ExtractionModelPreset {
-  String get title => switch (this) {
-    _ExtractionModelPreset.groqScout => 'Groq · Llama 4 Scout',
-    _ExtractionModelPreset.geminiFlash => 'Gemini · 2.5 Flash',
-    _ExtractionModelPreset.openRouterQwen => 'OpenRouter · Qwen VL',
+enum _ExtractionMode { adhoc, fullPaper }
+
+extension _ExtractionModeX on _ExtractionMode {
+  String get label => switch (this) {
+    _ExtractionMode.adhoc => 'Adhoc page',
+    _ExtractionMode.fullPaper => 'Full paper',
   };
 
-  String get subtitle => switch (this) {
-    _ExtractionModelPreset.groqScout => 'Default free-tier vision extractor',
-    _ExtractionModelPreset.geminiFlash =>
-      'Use only when Gemini quota is available',
-    _ExtractionModelPreset.openRouterQwen =>
-      'Requires OPENROUTER_API_KEY in worker env',
+  String get value => switch (this) {
+    _ExtractionMode.adhoc => 'adhoc',
+    _ExtractionMode.fullPaper => 'full_paper',
+  };
+}
+
+extension _ExtractionProviderX on _ExtractionProvider {
+  String get label => switch (this) {
+    _ExtractionProvider.gemini => 'Gemini',
+    _ExtractionProvider.groq => 'Groq',
+    _ExtractionProvider.openRouter => 'OpenRouter',
   };
 
-  String get provider => switch (this) {
-    _ExtractionModelPreset.groqScout => 'groq',
-    _ExtractionModelPreset.geminiFlash => 'gemini',
-    _ExtractionModelPreset.openRouterQwen => 'openrouter',
+  String get value => switch (this) {
+    _ExtractionProvider.gemini => 'gemini',
+    _ExtractionProvider.groq => 'groq',
+    _ExtractionProvider.openRouter => 'openrouter',
   };
 
-  String get model => switch (this) {
-    _ExtractionModelPreset.groqScout =>
-      'meta-llama/llama-4-scout-17b-16e-instruct',
-    _ExtractionModelPreset.geminiFlash => 'gemini-2.5-flash',
-    _ExtractionModelPreset.openRouterQwen =>
-      'qwen/qwen2.5-vl-72b-instruct:free',
+  String get defaultModel => switch (this) {
+    _ExtractionProvider.gemini => 'gemini-2.5-flash',
+    _ExtractionProvider.groq => 'meta-llama/llama-4-scout-17b-16e-instruct',
+    _ExtractionProvider.openRouter => 'qwen/qwen2.5-vl-72b-instruct:free',
   };
 }
 
@@ -842,11 +885,21 @@ class _NewJobSheetState extends ConsumerState<_NewJobSheet> {
   String? _paper;
   String _set = 'A';
   _LayoutPreset _preset = _LayoutPreset.autoBilingual;
-  _ExtractionModelPreset _model = _ExtractionModelPreset.groqScout;
+  _ExtractionMode _mode = _ExtractionMode.adhoc;
+  _ExtractionProvider _provider = _ExtractionProvider.gemini;
   String? _credentialId;
+  bool _showCredentialForm = false;
+  bool _savingCredential = false;
+  String? _credentialErr;
   final _year = TextEditingController(text: '');
   final _expected = TextEditingController(text: '100');
   final _paperCtrl = TextEditingController();
+  final _modelCtrl = TextEditingController(
+    text: _ExtractionProvider.gemini.defaultModel,
+  );
+  final _credentialLabelCtrl = TextEditingController();
+  final _credentialApiKeyCtrl = TextEditingController();
+  int _pageScope = 1;
   int _startPage = 1;
   int _pageStep = 1;
   int _hindiOffset = 0;
@@ -857,7 +910,11 @@ class _NewJobSheetState extends ConsumerState<_NewJobSheet> {
 
   static const _imageExts = {'png', 'jpg', 'jpeg'};
 
-  List<_LayoutPreset> get _availablePresets => _isImage
+  bool get _isAdhoc => _mode == _ExtractionMode.adhoc;
+
+  List<_LayoutPreset> get _availablePresets => _isAdhoc
+      ? const [_LayoutPreset.autoBilingual, _LayoutPreset.englishOnly]
+      : _isImage
       ? const [
           _LayoutPreset.autoBilingual,
           _LayoutPreset.samePage,
@@ -865,13 +922,42 @@ class _NewJobSheetState extends ConsumerState<_NewJobSheet> {
         ]
       : _LayoutPreset.values;
 
+  void _setMode(_ExtractionMode mode) {
+    if (_busy) return;
+    if (mode == _ExtractionMode.fullPaper && _isImage) {
+      setState(() => _err = 'Full paper mode needs a PDF. Pick a PDF first.');
+      return;
+    }
+    setState(() {
+      _mode = mode;
+      _err = null;
+      if (_isAdhoc) {
+        _pageScope = _isImage ? 1 : _pageScope.clamp(1, 2).toInt();
+        _expected.text = '0';
+        if (_preset != _LayoutPreset.autoBilingual &&
+            _preset != _LayoutPreset.englishOnly) {
+          _preset = _LayoutPreset.autoBilingual;
+        }
+        _startPage = 1;
+        _pageStep = 1;
+        _hindiOffset = 0;
+      } else {
+        if (_expected.text == '0') _expected.text = '100';
+        final defaults = _preset.pdfDefaults;
+        _startPage = defaults.$1;
+        _pageStep = defaults.$2;
+        _hindiOffset = defaults.$3;
+      }
+    });
+  }
+
   void _applyPreset(_LayoutPreset p) {
     final (start, step, offset) = p.pdfDefaults;
     setState(() {
       _preset = p;
-      _startPage = _isImage ? 1 : start;
-      _pageStep = _isImage ? 1 : step;
-      _hindiOffset = _isImage ? 0 : offset;
+      _startPage = _isAdhoc || _isImage ? 1 : start;
+      _pageStep = _isAdhoc || _isImage ? 1 : step;
+      _hindiOffset = _isAdhoc || _isImage ? 0 : offset;
     });
   }
 
@@ -897,6 +983,9 @@ class _NewJobSheetState extends ConsumerState<_NewJobSheet> {
     _year.dispose();
     _expected.dispose();
     _paperCtrl.dispose();
+    _modelCtrl.dispose();
+    _credentialLabelCtrl.dispose();
+    _credentialApiKeyCtrl.dispose();
     super.dispose();
   }
 
@@ -913,18 +1002,30 @@ class _NewJobSheetState extends ConsumerState<_NewJobSheet> {
       setState(() {
         _pdf = file;
         _isImage = isImg;
+        _err = null;
         if (isImg) {
+          _mode = _ExtractionMode.adhoc;
+          _pageScope = 1;
           _expected.text = '0';
-          final p = _availablePresets.contains(_preset)
-              ? _preset
-              : _LayoutPreset.samePage;
-          _preset = p;
+          if (_preset != _LayoutPreset.autoBilingual &&
+              _preset != _LayoutPreset.englishOnly) {
+            _preset = _LayoutPreset.autoBilingual;
+          }
+          _startPage = 1;
+          _pageStep = 1;
+          _hindiOffset = 0;
+        } else if (_isAdhoc) {
+          _pageScope = _pageScope.clamp(1, 2).toInt();
+          _expected.text = '0';
           _startPage = 1;
           _pageStep = 1;
           _hindiOffset = 0;
         } else {
           if (_expected.text == '0') _expected.text = '100';
-          _applyPreset(_preset);
+          final defaults = _preset.pdfDefaults;
+          _startPage = defaults.$1;
+          _pageStep = defaults.$2;
+          _hindiOffset = defaults.$3;
         }
       });
     }
@@ -955,6 +1056,23 @@ class _NewJobSheetState extends ConsumerState<_NewJobSheet> {
     final credential = _selectedCredential(
       ref.read(extractionCredentialsProvider).valueOrNull ?? const [],
     );
+    final modelName = _modelCtrl.text.trim();
+    if (credential == null && modelName.isEmpty) {
+      setState(() => _err = 'Enter a model name.');
+      return;
+    }
+    final isAdhoc = _isAdhoc;
+    final pageScope = isAdhoc ? (_isImage ? 1 : _pageScope) : 0;
+    final layout = isAdhoc
+        ? _LayoutPreset.autoBilingual.contractValue
+        : _preset.contractValue;
+    final expectedCount = isAdhoc
+        ? 0
+        : (int.tryParse(_expected.text.trim()) ?? 0);
+    final startPage = isAdhoc ? 1 : _startPage;
+    final endPage = isAdhoc ? pageScope : 0;
+    final pageStep = isAdhoc ? 1 : _pageStep;
+    final hindiOffset = isAdhoc ? 0 : _hindiOffset;
     setState(() {
       _busy = true;
       _err = null;
@@ -972,14 +1090,17 @@ class _NewJobSheetState extends ConsumerState<_NewJobSheet> {
             fileExtension: _pdf!.extension,
             bytes: _pdf!.bytes!,
             isImage: _isImage,
-            layout: _preset.contractValue,
+            mode: _mode.value,
+            pageScope: pageScope,
+            layout: layout,
             wantHindi: _preset.wantHindi,
-            expectedCount: int.tryParse(_expected.text.trim()) ?? 0,
-            startPage: _startPage,
-            pageStep: _pageStep,
-            hindiOffset: _hindiOffset,
-            modelProvider: credential?.provider ?? _model.provider,
-            modelName: credential?.model ?? _model.model,
+            expectedCount: expectedCount,
+            startPage: startPage,
+            endPage: endPage,
+            pageStep: pageStep,
+            hindiOffset: hindiOffset,
+            modelProvider: credential?.provider ?? _provider.value,
+            modelName: credential?.model ?? modelName,
             credentialId: _credentialId,
           );
       ref.invalidate(extractionJobsProvider);
@@ -1041,6 +1162,23 @@ class _NewJobSheetState extends ConsumerState<_NewJobSheet> {
             ),
             const SizedBox(height: 16),
 
+            _sectionLabel('Mode'),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: _ExtractionMode.values
+                  .map(
+                    (mode) => _Chip(
+                      label: mode.label,
+                      selected: _mode == mode,
+                      onTap: () => _setMode(mode),
+                    ),
+                  )
+                  .toList(),
+            ),
+            const SizedBox(height: 16),
+
             // File picker
             GestureDetector(
               onTap: _busy ? null : _pick,
@@ -1074,14 +1212,19 @@ class _NewJobSheetState extends ConsumerState<_NewJobSheet> {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            _pdf?.name ?? 'Choose PDF or image (PNG / JPG)',
+                            _pdf?.name ??
+                                (_isAdhoc
+                                    ? 'Choose image or 1-2 page PDF'
+                                    : 'Choose full paper PDF'),
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: theme.textTheme.bodyMedium,
                           ),
                           if (_pdf == null)
                             Text(
-                              'PDF · PNG · JPG — max 50 MB',
+                              _isAdhoc
+                                  ? 'PDF / PNG / JPG - max 50 MB'
+                                  : 'PDF only - max 50 MB',
                               style: theme.textTheme.bodySmall?.copyWith(
                                 color: context.pal.grey400,
                               ),
@@ -1094,6 +1237,37 @@ class _NewJobSheetState extends ConsumerState<_NewJobSheet> {
               ),
             ),
             const SizedBox(height: 16),
+            if (_isAdhoc) ...[
+              _sectionLabel('Page scope'),
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: [
+                  _Chip(
+                    label: '1 page',
+                    selected: _pageScope == 1,
+                    onTap: () => setState(() => _pageScope = 1),
+                  ),
+                  _Chip(
+                    label: '2 pages',
+                    selected: !_isImage && _pageScope == 2,
+                    onTap: _isImage
+                        ? () {}
+                        : () => setState(() => _pageScope = 2),
+                  ),
+                  if (_isImage)
+                    Text(
+                      'Image uploads run as one page.',
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: context.pal.grey400,
+                      ),
+                    ),
+                ],
+              ),
+              const SizedBox(height: 16),
+            ],
 
             // Exam dropdown (loaded from DB)
             examsAsync.when(
@@ -1208,54 +1382,40 @@ class _NewJobSheetState extends ConsumerState<_NewJobSheet> {
             ),
             const SizedBox(height: 14),
 
-            _sectionLabel('Extraction model'),
+            _sectionLabel('Model provider'),
             const SizedBox(height: 8),
-            DropdownButtonFormField<_ExtractionModelPreset>(
-              initialValue: _model,
-              decoration: InputDecoration(
-                filled: true,
-                fillColor: context.pal.grey100,
-                contentPadding: const EdgeInsets.symmetric(
-                  vertical: 10,
-                  horizontal: 14,
-                ),
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(10),
-                  borderSide: BorderSide.none,
-                ),
-              ),
-              isExpanded: true,
-              items: _ExtractionModelPreset.values
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: _ExtractionProvider.values
                   .map(
-                    (m) => DropdownMenuItem(
-                      value: m,
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Text(m.title, overflow: TextOverflow.ellipsis),
-                          Text(
-                            m.subtitle,
-                            overflow: TextOverflow.ellipsis,
-                            style: theme.textTheme.bodySmall?.copyWith(
-                              color: context.pal.grey400,
-                            ),
-                          ),
-                        ],
-                      ),
+                    (provider) => _Chip(
+                      label: provider.label,
+                      selected: _provider == provider,
+                      onTap: _busy
+                          ? () {}
+                          : () => setState(() {
+                              final oldDefault = _provider.defaultModel;
+                              _provider = provider;
+                              _credentialId = null;
+                              if (_modelCtrl.text.trim().isEmpty ||
+                                  _modelCtrl.text.trim() == oldDefault) {
+                                _modelCtrl.text = provider.defaultModel;
+                              }
+                            }),
                     ),
                   )
                   .toList(),
-              onChanged: _busy
-                  ? null
-                  : (value) {
-                      if (value != null) {
-                        setState(() {
-                          _model = value;
-                          _credentialId = null;
-                        });
-                      }
-                    },
+            ),
+            const SizedBox(height: 14),
+            _sectionLabel('Model'),
+            const SizedBox(height: 6),
+            TextField(
+              controller: _modelCtrl,
+              onChanged: (_) => setState(() => _credentialId = null),
+              decoration: _softFieldDecoration(
+                context,
+              ).copyWith(hintText: _provider.defaultModel),
             ),
             const SizedBox(height: 14),
 
@@ -1281,29 +1441,31 @@ class _NewJobSheetState extends ConsumerState<_NewJobSheet> {
               ],
             ),
             const SizedBox(height: 8),
-            ExpansionTile(
-              tilePadding: EdgeInsets.zero,
-              childrenPadding: EdgeInsets.zero,
-              title: Text(
-                'Advanced layout override',
-                style: theme.textTheme.bodyMedium?.copyWith(
-                  fontWeight: FontWeight.w600,
+            if (!_isAdhoc) ...[
+              ExpansionTile(
+                tilePadding: EdgeInsets.zero,
+                childrenPadding: EdgeInsets.zero,
+                title: Text(
+                  'Advanced layout override',
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
+                children: _availablePresets
+                    .where((p) => p != _LayoutPreset.autoBilingual)
+                    .map(
+                      (p) => _PresetCard(
+                        preset: p,
+                        selected: _preset == p,
+                        onTap: () => _applyPreset(p),
+                      ),
+                    )
+                    .toList(),
               ),
-              children: _availablePresets
-                  .where((p) => p != _LayoutPreset.autoBilingual)
-                  .map(
-                    (p) => _PresetCard(
-                      preset: p,
-                      selected: _preset == p,
-                      onTap: () => _applyPreset(p),
-                    ),
-                  )
-                  .toList(),
-            ),
-            const SizedBox(height: 14),
+              const SizedBox(height: 14),
 
-            _field('Expected questions', _expected, number: true),
+              _field('Expected questions', _expected, number: true),
+            ],
 
             if (_err != null) ...[
               const SizedBox(height: 12),
@@ -1313,14 +1475,16 @@ class _NewJobSheetState extends ConsumerState<_NewJobSheet> {
               ),
             ],
             const SizedBox(height: 20),
-            Row(
+            Wrap(
+              alignment: WrapAlignment.end,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              spacing: 8,
+              runSpacing: 8,
               children: [
-                const Spacer(),
                 TextButton(
                   onPressed: _busy ? null : () => Navigator.pop(context),
                   child: const Text('Cancel'),
                 ),
-                const SizedBox(width: 8),
                 FilledButton.icon(
                   style: FilledButton.styleFrom(
                     backgroundColor: context.pal.indigo,
@@ -1335,7 +1499,7 @@ class _NewJobSheetState extends ConsumerState<_NewJobSheet> {
                           ),
                         )
                       : const Icon(Icons.upload_outlined, size: 16),
-                  label: const Text('Upload & queue'),
+                  label: const Text('Upload and queue'),
                   onPressed: _busy ? null : _submit,
                 ),
               ],
@@ -1346,6 +1510,53 @@ class _NewJobSheetState extends ConsumerState<_NewJobSheet> {
     );
   }
 
+  Future<void> _saveCredential() async {
+    final apiKey = _credentialApiKeyCtrl.text.trim();
+    final model = _modelCtrl.text.trim();
+    if (apiKey.isEmpty || model.isEmpty) {
+      setState(() => _credentialErr = 'API key and model are required.');
+      return;
+    }
+
+    FocusManager.instance.primaryFocus?.unfocus();
+    setState(() {
+      _savingCredential = true;
+      _credentialErr = null;
+    });
+
+    try {
+      final id = await ref
+          .read(qbankApiProvider)
+          .saveExtractionCredential(
+            QbankSaveExtractionCredentialRequestDto(
+              label: _credentialLabelCtrl.text.trim().isEmpty
+                  ? '${_provider.label} key'
+                  : _credentialLabelCtrl.text.trim(),
+              provider: _provider.value,
+              model: model,
+              apiKey: apiKey,
+            ),
+          );
+
+      if (!mounted) return;
+      _credentialLabelCtrl.clear();
+      _credentialApiKeyCtrl.clear();
+      ref.invalidate(extractionCredentialsProvider);
+      setState(() {
+        _savingCredential = false;
+        _showCredentialForm = false;
+        _credentialErr = null;
+        _credentialId = id;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _savingCredential = false;
+        _credentialErr = '$e';
+      });
+    }
+  }
+
   Widget _credentialPicker(
     BuildContext context,
     ThemeData theme,
@@ -1354,7 +1565,7 @@ class _NewJobSheetState extends ConsumerState<_NewJobSheet> {
     final credentials = credentialsAsync.valueOrNull ?? const [];
     final providerCredentials = credentials
         .where((credential) => credential.isActive)
-        .where((credential) => credential.provider == _model.provider)
+        .where((credential) => credential.provider == _provider.value)
         .toList();
     final selected = _selectedCredential(providerCredentials);
     final selectedValue = selected?.id ?? '';
@@ -1366,9 +1577,14 @@ class _NewJobSheetState extends ConsumerState<_NewJobSheet> {
           children: [
             Expanded(child: _sectionLabel('API key')),
             TextButton.icon(
-              onPressed: _busy ? null : () => _showCredentialDialog(context),
+              onPressed: _busy || _savingCredential
+                  ? null
+                  : () => setState(() {
+                      _showCredentialForm = !_showCredentialForm;
+                      _credentialErr = null;
+                    }),
               icon: const Icon(Icons.add, size: 16),
-              label: const Text('Add key'),
+              label: Text(_showCredentialForm ? 'Hide key form' : 'Add key'),
             ),
           ],
         ),
@@ -1381,19 +1597,14 @@ class _NewJobSheetState extends ConsumerState<_NewJobSheet> {
           ),
           data: (_) => DropdownButtonFormField<String>(
             initialValue: selectedValue,
-            decoration: InputDecoration(
-              filled: true,
-              fillColor: context.pal.grey100,
-              contentPadding: const EdgeInsets.symmetric(
-                vertical: 10,
-                horizontal: 14,
-              ),
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(10),
-                borderSide: BorderSide.none,
-              ),
-            ),
+            decoration: _softFieldDecoration(context),
             isExpanded: true,
+            selectedItemBuilder: (context) => [
+              const _DropdownSelectedText('Workflow default key'),
+              ...providerCredentials.map(
+                (credential) => _DropdownSelectedText(credential.label),
+              ),
+            ],
             items: [
               DropdownMenuItem(
                 value: '',
@@ -1405,19 +1616,9 @@ class _NewJobSheetState extends ConsumerState<_NewJobSheet> {
               ...providerCredentials.map(
                 (credential) => DropdownMenuItem(
                   value: credential.id,
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(credential.label, overflow: TextOverflow.ellipsis),
-                      Text(
-                        '${credential.model} · ${credential.keyPreview}',
-                        overflow: TextOverflow.ellipsis,
-                        style: theme.textTheme.bodySmall?.copyWith(
-                          color: context.pal.grey400,
-                        ),
-                      ),
-                    ],
+                  child: _DropdownMenuText(
+                    title: credential.label,
+                    subtitle: '${credential.model} / ${credential.keyPreview}',
                   ),
                 ),
               ),
@@ -1433,146 +1634,83 @@ class _NewJobSheetState extends ConsumerState<_NewJobSheet> {
                   },
           ),
         ),
-      ],
-    );
-  }
-
-  Future<void> _showCredentialDialog(BuildContext context) async {
-    var preset = _model;
-    final label = TextEditingController();
-    final model = TextEditingController(text: _model.model);
-    final apiKey = TextEditingController();
-    bool busy = false;
-    String? error;
-
-    final savedId = await showDialog<String>(
-      context: context,
-      builder: (dialogContext) {
-        return StatefulBuilder(
-          builder: (context, setDialogState) {
-            Future<void> save() async {
-              final key = apiKey.text.trim();
-              final modelText = model.text.trim();
-              if (key.isEmpty || modelText.isEmpty) {
-                setDialogState(() {
-                  error = 'API key and model are required.';
-                });
-                return;
-              }
-              setDialogState(() {
-                busy = true;
-                error = null;
-              });
-              try {
-                final id = await ref
-                    .read(qbankApiProvider)
-                    .saveExtractionCredential(
-                      QbankSaveExtractionCredentialRequestDto(
-                        label: label.text.trim().isEmpty
-                            ? '${preset.title} key'
-                            : label.text.trim(),
-                        provider: preset.provider,
-                        model: modelText,
-                        apiKey: key,
-                      ),
-                    );
-                if (context.mounted) Navigator.pop(context, id);
-              } catch (e) {
-                setDialogState(() {
-                  busy = false;
-                  error = '$e';
-                });
-              }
-            }
-
-            return AlertDialog(
-              title: const Text('Add extraction key'),
-              content: SingleChildScrollView(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
+        if (_showCredentialForm) ...[
+          const SizedBox(height: 12),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: context.pal.grey100,
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: context.pal.grey200),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Label', style: theme.textTheme.labelMedium),
+                const SizedBox(height: 6),
+                TextField(
+                  controller: _credentialLabelCtrl,
+                  enabled: !_savingCredential,
+                  decoration: _softFieldDecoration(
+                    context,
+                  ).copyWith(hintText: 'e.g. Gemini key 2'),
+                ),
+                const SizedBox(height: 10),
+                Text('API key', style: theme.textTheme.labelMedium),
+                const SizedBox(height: 6),
+                TextField(
+                  controller: _credentialApiKeyCtrl,
+                  enabled: !_savingCredential,
+                  obscureText: true,
+                  decoration: _softFieldDecoration(context),
+                ),
+                if (_credentialErr != null) ...[
+                  const SizedBox(height: 10),
+                  Text(
+                    _credentialErr!,
+                    style: TextStyle(
+                      color: Theme.of(context).colorScheme.error,
+                      fontSize: 12,
+                    ),
+                  ),
+                ],
+                const SizedBox(height: 12),
+                Wrap(
+                  alignment: WrapAlignment.end,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  spacing: 8,
+                  runSpacing: 8,
                   children: [
-                    DropdownButtonFormField<_ExtractionModelPreset>(
-                      initialValue: preset,
-                      decoration: const InputDecoration(labelText: 'Provider'),
-                      items: _ExtractionModelPreset.values
-                          .map(
-                            (item) => DropdownMenuItem(
-                              value: item,
-                              child: Text(item.title),
-                            ),
-                          )
-                          .toList(),
-                      onChanged: busy
+                    TextButton(
+                      onPressed: _savingCredential
                           ? null
-                          : (value) {
-                              if (value == null) return;
-                              setDialogState(() {
-                                preset = value;
-                                model.text = value.model;
-                              });
-                            },
+                          : () => setState(() {
+                              _showCredentialForm = false;
+                              _credentialErr = null;
+                              _credentialLabelCtrl.clear();
+                              _credentialApiKeyCtrl.clear();
+                            }),
+                      child: const Text('Cancel'),
                     ),
-                    TextField(
-                      controller: model,
-                      decoration: const InputDecoration(
-                        labelText: 'Model',
-                        hintText: 'e.g. gemini-2.5-flash',
-                      ),
+                    FilledButton(
+                      onPressed: _savingCredential ? null : _saveCredential,
+                      child: _savingCredential
+                          ? const SizedBox(
+                              width: 16,
+                              height: 16,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Text('Save key'),
                     ),
-                    TextField(
-                      controller: label,
-                      decoration: const InputDecoration(
-                        labelText: 'Label',
-                        hintText: 'e.g. Gemini key 2',
-                      ),
-                    ),
-                    TextField(
-                      controller: apiKey,
-                      obscureText: true,
-                      decoration: const InputDecoration(labelText: 'API key'),
-                    ),
-                    if (error != null) ...[
-                      const SizedBox(height: 10),
-                      Text(
-                        error!,
-                        style: TextStyle(color: context.pal.red, fontSize: 12),
-                      ),
-                    ],
                   ],
                 ),
-              ),
-              actions: [
-                TextButton(
-                  onPressed: busy ? null : () => Navigator.pop(context),
-                  child: const Text('Cancel'),
-                ),
-                FilledButton(
-                  onPressed: busy ? null : save,
-                  child: busy
-                      ? const SizedBox(
-                          width: 16,
-                          height: 16,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : const Text('Save key'),
-                ),
               ],
-            );
-          },
-        );
-      },
+            ),
+          ),
+        ],
+      ],
     );
-
-    label.dispose();
-    model.dispose();
-    apiKey.dispose();
-
-    if (savedId == null || !mounted) return;
-    ref.invalidate(extractionCredentialsProvider);
-    setState(() {
-      _model = preset;
-      _credentialId = savedId;
-    });
   }
 
   Widget _sectionLabel(String text) => Text(
@@ -1580,7 +1718,7 @@ class _NewJobSheetState extends ConsumerState<_NewJobSheet> {
     style: TextStyle(
       fontSize: 10,
       fontWeight: FontWeight.w700,
-      letterSpacing: 0.8,
+      letterSpacing: 0,
       color: context.pal.grey400,
     ),
   );
@@ -1595,18 +1733,63 @@ class _NewJobSheetState extends ConsumerState<_NewJobSheet> {
     controller: c,
     keyboardType: number ? TextInputType.number : TextInputType.text,
     onChanged: onChanged,
-    decoration: InputDecoration(
-      labelText: label,
-      hintText: hint,
-      filled: true,
-      fillColor: context.pal.grey100,
-      contentPadding: const EdgeInsets.symmetric(vertical: 10, horizontal: 14),
-      border: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(10),
-        borderSide: BorderSide.none,
-      ),
+    decoration: _softFieldDecoration(
+      context,
+    ).copyWith(labelText: label, hintText: hint),
+  );
+
+  InputDecoration _softFieldDecoration(BuildContext context) => InputDecoration(
+    filled: true,
+    fillColor: context.pal.grey100,
+    contentPadding: const EdgeInsets.symmetric(vertical: 12, horizontal: 14),
+    border: OutlineInputBorder(
+      borderRadius: BorderRadius.circular(8),
+      borderSide: BorderSide.none,
     ),
   );
+}
+
+class _DropdownSelectedText extends StatelessWidget {
+  final String text;
+  const _DropdownSelectedText(this.text);
+
+  @override
+  Widget build(BuildContext context) {
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: Text(text, maxLines: 1, overflow: TextOverflow.ellipsis),
+    );
+  }
+}
+
+class _DropdownMenuText extends StatelessWidget {
+  final String title;
+  final String subtitle;
+  const _DropdownMenuText({required this.title, required this.subtitle});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return ConstrainedBox(
+      constraints: const BoxConstraints(minHeight: 44),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisAlignment: MainAxisAlignment.center,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(title, maxLines: 1, overflow: TextOverflow.ellipsis),
+          Text(
+            subtitle,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: context.pal.grey400,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 // ── Chip widget ───────────────────────────────────────────────────────────────
@@ -1753,6 +1936,13 @@ class _JobDetailSheet extends ConsumerWidget {
         ?.cast<String, dynamic>();
     final models = (job.report?['models_used'] as List?) ?? const [];
     final stage = job.progress['stage']?.toString();
+    final inputType = (job.report?['input_type'] ?? job.params['input_type'])
+        ?.toString();
+    final pageScope = job.report?['page_scope'] ?? job.params['page_scope'];
+    final processedPages =
+        (job.report?['processed_pages'] as List?) ?? const [];
+    final skippedPages = (job.report?['skipped_pages'] as List?) ?? const [];
+    String pagesText(List pages) => pages.map((p) => '$p').join(', ');
     final expected = (cov?['expected_count'] as num?)?.toInt() ?? 0;
     // Live gap from the backend contract, unlike the frozen coverage snapshot
     // from extraction time.
@@ -1806,6 +1996,8 @@ class _JobDetailSheet extends ConsumerWidget {
                   ],
                 ),
               ),
+              _ModeChip(isAdhoc: job.isAdhoc),
+              const SizedBox(width: 6),
               _StatusChip(status: job.status),
             ],
           ),
@@ -1820,6 +2012,27 @@ class _JobDetailSheet extends ConsumerWidget {
           const SizedBox(height: 16),
           if (stage != null && stage.isNotEmpty)
             _statRow(context, ('Stage', stage, context.pal.indigo)),
+          _statRow(context, (
+            'Mode',
+            job.isAdhoc ? 'Adhoc page' : 'Full paper',
+            null,
+          )),
+          if (inputType != null && inputType.isNotEmpty)
+            _statRow(context, ('Input', inputType, null)),
+          if (pageScope != null)
+            _statRow(context, ('Page scope', '$pageScope', null)),
+          if (processedPages.isNotEmpty)
+            _statRow(context, (
+              'Processed pages',
+              pagesText(processedPages),
+              null,
+            )),
+          if (skippedPages.isNotEmpty)
+            _statRow(context, (
+              'Skipped pages',
+              pagesText(skippedPages),
+              context.pal.amber,
+            )),
           if (cov != null) ...[
             _statRow(context, () {
               final found = cov['found'];

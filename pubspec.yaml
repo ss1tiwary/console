@@ -44,7 +44,7 @@ dependencies:
 
   # File upload (PDF / image) for extraction tool.
   # compileSdk 36 required by file_picker 8.x on Android — set in build.gradle.kts.
-  file_picker: ^8.1.2
+  file_picker: 10.3.7
 
   # Auth — native Google Sign-In → Supabase signInWithIdToken.
   # Same web client ID and GCP project as PIBrief.
